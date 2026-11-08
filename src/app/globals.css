@@ -1,0 +1,219 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* Theme follows the system by default; next-themes sets .dark on <html>. */
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-sans);
+
+  /* Surfaces (layered depth instead of borders everywhere) */
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+
+  /* Brand */
+  --color-lime: var(--lime);
+  --color-lime-ink: var(--lime-ink);
+  --color-on-lime: var(--on-lime);
+
+  /* Budget bands (§7.3): <50 ok, 50–80 warn, 80–100 high, >=100 over */
+  --color-budget-ok: var(--budget-ok);
+  --color-budget-warn: var(--budget-warn);
+  --color-budget-high: var(--budget-high);
+  --color-budget-over: var(--budget-over);
+
+  /* Money semantics */
+  --color-money-in: var(--money-in);
+  --color-money-out: var(--foreground);
+
+  /* shadcn mapping */
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* Motion: rich but quick, everything under 300ms */
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-out-quick: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 280ms;
+}
+
+/* ---------- Light: white surfaces, same lime family, darker lime for text ---------- */
+:root {
+  --radius: 0.875rem;
+
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --surface-1: #f6f6f4;
+  --surface-2: #eeeeeb;
+  --surface-3: #e4e4e0;
+
+  --lime: #b6ff3b;        /* fills only (buttons, donut arcs, chips) */
+  --lime-ink: #3f6212;    /* lime used as text / thin lines on white — WCAG AA */
+  --on-lime: #0a0a0a;
+
+  --budget-ok: #4d7c0f;
+  --budget-warn: #ca8a04;
+  --budget-high: #c2410c;
+  --budget-over: #dc2626;
+  --money-in: #3f6212;
+
+  --card: var(--surface-1);
+  --card-foreground: var(--foreground);
+  --popover: #ffffff;
+  --popover-foreground: var(--foreground);
+  --primary: var(--lime);
+  --primary-foreground: var(--on-lime);
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--foreground);
+  --muted: var(--surface-2);
+  --muted-foreground: #6b6b66;
+  --accent: var(--surface-2);
+  --accent-foreground: var(--foreground);
+  --destructive: var(--budget-over);
+  --border: #e6e6e1;
+  --input: #e6e6e1;
+  --ring: var(--lime-ink);
+
+  --chart-1: var(--lime);
+  --chart-2: #22d3ee;
+  --chart-3: #a78bfa;
+  --chart-4: #fb923c;
+  --chart-5: #f472b6;
+
+  --sidebar: var(--surface-1);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--lime);
+  --sidebar-primary-foreground: var(--on-lime);
+  --sidebar-accent: var(--surface-2);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--lime-ink);
+}
+
+/* ---------- Dark: the hero look — near-black + electric lime ---------- */
+.dark {
+  --background: #0a0a0a;
+  --foreground: #f4f4f2;
+  --surface-1: #131313;
+  --surface-2: #1b1b1b;
+  --surface-3: #252525;
+
+  --lime: #b6ff3b;
+  --lime-ink: #b6ff3b;    /* on black, the bright lime is readable as text */
+  --on-lime: #0a0a0a;
+
+  --budget-ok: #b6ff3b;
+  --budget-warn: #ffd60a;
+  --budget-high: #ff7a1a;
+  --budget-over: #ff3b30;
+  --money-in: #b6ff3b;
+
+  --card: var(--surface-1);
+  --card-foreground: var(--foreground);
+  --popover: var(--surface-2);
+  --popover-foreground: var(--foreground);
+  --primary: var(--lime);
+  --primary-foreground: var(--on-lime);
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--foreground);
+  --muted: var(--surface-2);
+  --muted-foreground: #8c8c88;
+  --accent: var(--surface-3);
+  --accent-foreground: var(--foreground);
+  --destructive: var(--budget-over);
+  --border: rgb(255 255 255 / 0.08);
+  --input: rgb(255 255 255 / 0.12);
+  --ring: var(--lime);
+
+  --chart-1: var(--lime);
+  --chart-2: #22d3ee;
+  --chart-3: #a78bfa;
+  --chart-4: #fb923c;
+  --chart-5: #f472b6;
+
+  --sidebar: #0f0f0f;
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--lime);
+  --sidebar-primary-foreground: var(--on-lime);
+  --sidebar-accent: var(--surface-2);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--lime);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-background text-foreground;
+    overscroll-behavior-y: none;
+  }
+}
+
+@layer utilities {
+  /* Every amount: monospaced tabular figures so columns line up */
+  .num {
+    font-family: var(--font-geist-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "zero" 0;
+    letter-spacing: -0.02em;
+  }
+  /* iOS safe areas for the installed PWA */
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+  .pt-safe { padding-top: env(safe-area-inset-top); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    transition-duration: 1ms !important;
+  }
+}
