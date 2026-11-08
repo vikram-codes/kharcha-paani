@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition, type ReactElement } from "react";
-import { ChevronDown, Delete, Loader2 } from "lucide-react";
+import { Delete, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { addTransaction, loadQuickAdd } from "@/app/actions/transactions";
 import { CategoryChip } from "@/components/category-icon";
+import { ThemedSelect } from "@/components/themed-select";
 import { ResponsiveSheetContent } from "@/components/ui/responsive-sheet";
 import { Sheet, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { formatCents, parseToCents } from "@/lib/money";
@@ -142,25 +143,15 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
 
           {/* Paid from + date */}
           <div className="grid grid-cols-[1fr_auto] gap-2">
-            <label className="relative">
-              <span className="sr-only">{kind === "expense" ? "Paid from" : "Deposited to"}</span>
-              <select
-                value={accountId}
-                onChange={(e) => setAccountId(e.target.value)}
-                disabled={!opts}
-                className="h-11 w-full appearance-none rounded-xl bg-surface-1 pr-9 pl-3 text-sm ring-1 ring-border outline-none focus:ring-2 focus:ring-lime"
-              >
-                {!opts && <option>Loading…</option>}
-                {opts?.accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {kind === "expense" ? "From " : "Into "}
-                    {shortName(a.name)}
-                    {a.last4 ? ` ••${a.last4}` : ""}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-muted-foreground" />
-            </label>
+            <ThemedSelect
+              ariaLabel={kind === "expense" ? "Paid from" : "Deposited to"}
+              prefix={kind === "expense" ? "From" : "Into"}
+              value={accountId || null}
+              onChange={(v) => v && setAccountId(v)}
+              disabled={!opts}
+              placeholder="Loading…"
+              options={(opts?.accounts ?? []).map((a) => ({ value: a.id, label: shortName(a.name), hint: a.last4 ? `••${a.last4}` : undefined }))}
+            />
             <input
               type="date"
               value={date}

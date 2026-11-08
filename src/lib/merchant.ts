@@ -25,7 +25,7 @@ const KNOWN: [RegExp, string][] = [
   [/economical insurance/i, "Economical Insurance"],
   [/payroll dep/i, "Payroll"],
   [/interest charges/i, "Interest charge"],
-  [/payment thank you|paiement merci/i, "Card payment"],
+  [/payment thank you|paiement merci|ctfs\.com\/payments|payment from - \*/i, "Card payment"],
   [/e-?transfer/i, "Interac e-Transfer"],
   [/affirm/i, "Affirm"],
 ];

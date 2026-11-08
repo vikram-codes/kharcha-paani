@@ -2,12 +2,14 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, CheckCircle2, FileUp, Loader2, X } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle2, FileUp, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
 import { confirmImport, previewImport } from "@/app/actions/imports";
 import { formatShort } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
+import { ThemedSelect } from "@/components/themed-select";
+import { categoryOptions } from "@/components/transactions/transaction-sheet";
 
 type PreviewOk = Extract<Awaited<ReturnType<typeof previewImport>>, { ok: true }>;
 type Row = PreviewOk["preview"]["rows"][number];
@@ -80,7 +82,10 @@ export function ImportFlow() {
   const allOk = p.checks.every((c) => c.ok);
   const chosen = p.rows.map((r, i) => ({ r, i })).filter(({ i }) => include[i]);
   const counts = p.rows.reduce<Record<string, number>>((m, r) => ((m[r.status] = (m[r.status] ?? 0) + 1), m), {});
-  const grouped = data.categories.reduce<Record<string, typeof data.categories>>((g, c) => ((g[c.kind] ??= []).push(c), g), {});
+  const catOptions = categoryOptions({ accounts: [], categories: data.categories });
+  const kindOf = new Map(data.categories.map((c) => [c.id, c.kind]));
+  // A payment onto a card is a transfer: it lowers what you owe, it isn't income.
+  const isPayment = (i: number) => kindOf.get(cats[i] ?? "") === "transfer";
 
   const commit = () =>
     startSaving(async () => {
@@ -128,20 +133,26 @@ export function ImportFlow() {
         {p.rows.map((r, i) => (
           <div key={r.fingerprint} className={cn("flex flex-col gap-2 py-3", !include[i] && "opacity-50")}>
             <div className="flex items-center gap-3">
-              <input
-                type="checkbox"
-                checked={include[i]}
-                onChange={(e) => setInclude((xs) => xs.map((x, j) => (j === i ? e.target.checked : x)))}
-                className="size-5 shrink-0 accent-[var(--lime)]"
-                aria-label={`Import ${r.merchant}`}
-              />
+              <label className="relative grid size-5 shrink-0 cursor-pointer place-items-center">
+                <input
+                  type="checkbox"
+                  checked={include[i]}
+                  onChange={(e) => setInclude((xs) => xs.map((x, j) => (j === i ? e.target.checked : x)))}
+                  className="peer size-5 cursor-pointer appearance-none rounded-md bg-surface-2 ring-1 ring-border transition-colors duration-(--duration-fast) checked:bg-lime checked:ring-lime focus-visible:ring-2 focus-visible:ring-lime"
+                  aria-label={`Import ${r.merchant}`}
+                />
+                <Check className="pointer-events-none absolute size-3.5 text-on-lime opacity-0 peer-checked:opacity-100" strokeWidth={3} />
+              </label>
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-sm font-medium">{r.merchant || r.description}</span>
                 <span className="text-xs text-muted-foreground">
                   {formatShort(r.date)} · <span className={STATUS[r.status].tone}>{STATUS[r.status].label}</span>
+                  {isPayment(i) && <span> · {r.amount_cents > 0 ? "Card payment" : "Transfer"}</span>}
                 </span>
               </span>
-              <span className={cn("num shrink-0 text-sm font-medium", r.amount_cents > 0 && "text-money-in")}>{formatCents(r.amount_cents, { signed: r.amount_cents > 0 })}</span>
+              <span className={cn("num shrink-0 text-sm font-medium", r.amount_cents > 0 && !isPayment(i) && "text-money-in", isPayment(i) && "text-muted-foreground")}>
+                {formatCents(r.amount_cents, { signed: r.amount_cents > 0 })}
+              </span>
             </div>
             {r.match && r.status === "possible" && (
               <p className="ml-8 rounded-lg bg-surface-2 px-2 py-1 text-[11px] text-muted-foreground">
@@ -149,23 +160,17 @@ export function ImportFlow() {
               </p>
             )}
             {include[i] && (
-              <select
-                value={cats[i] ?? ""}
-                onChange={(e) => setCats((xs) => xs.map((x, j) => (j === i ? e.target.value || null : x)))}
-                className={cn("ml-8 h-9 rounded-lg bg-surface-2 px-2 text-xs outline-none focus:ring-2 focus:ring-lime", !cats[i] && "text-budget-high")}
-                aria-label="Category"
-              >
-                <option value="">Choose a category…</option>
-                {Object.entries(grouped).map(([kind, list]) => (
-                  <optgroup key={kind} label={kind}>
-                    {list.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.parent} · {c.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                ))}
-              </select>
+              <div className="ml-8">
+                <ThemedSelect
+                  size="sm"
+                  ariaLabel="Category"
+                  value={cats[i]}
+                  onChange={(v) => setCats((xs) => xs.map((x, j) => (j === i ? v : x)))}
+                  placeholder="Choose a category…"
+                  warn
+                  options={catOptions}
+                />
+              </div>
             )}
           </div>
         ))}

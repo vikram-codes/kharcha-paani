@@ -12,6 +12,7 @@ describe("cleanMerchant", () => {
     ["OLDSKOOL RASOI BRAMPTON ON", "Oldskool Rasoi"],
     ["THE DARLING HOME FOR K MILTON ON Personal and Hous", "The Darling Home For K"],
     ["Dining", "Dining"],
+    ["CTFS.COM/PAYMENTS OAKVILLE ON", "Card payment"],
   ])("%s → %s", (raw, clean) => {
     expect(cleanMerchant(raw)).toBe(clean);
   });

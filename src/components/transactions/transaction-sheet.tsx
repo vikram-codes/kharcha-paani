@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { ChevronDown, Loader2, Split, Trash2 } from "lucide-react";
+import { Loader2, Split, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   loadEditOptions,
@@ -9,6 +9,7 @@ import {
   saveTransaction,
 } from "@/app/actions/activity";
 import { CategoryChip } from "@/components/category-icon";
+import { ThemedSelect, type SelectOption } from "@/components/themed-select";
 import { ResponsiveSheetContent } from "@/components/ui/responsive-sheet";
 import { Sheet, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import type { ActivityRow } from "@/lib/data";
@@ -25,6 +26,18 @@ const KIND_LABEL: Record<string, string> = {
   reimbursement: "Paid back",
   adjustment: "Adjustments",
 };
+
+/** Categories as grouped dropdown options (Spending, Income, Transfers…). */
+export function categoryOptions(opts: Options | null): SelectOption[] {
+  return (opts?.categories ?? []).map((c) => ({
+    value: c.id,
+    label: c.name,
+    hint: c.parent ?? undefined,
+    icon: c.icon,
+    color: c.color,
+    group: KIND_LABEL[c.kind] ?? c.kind,
+  }));
+}
 
 const field =
   "h-11 w-full rounded-xl bg-surface-1 px-3 text-sm ring-1 ring-border outline-none focus:ring-2 focus:ring-lime";
@@ -122,12 +135,6 @@ function EditForm({
     });
   };
 
-  const grouped = (opts?.categories ?? []).reduce<
-    Record<string, Options["categories"]>
-  >((g, c) => {
-    (g[c.kind] ??= []).push(c);
-    return g;
-  }, {});
   const selected = opts?.categories.find((c) => c.id === categoryId);
 
   return (
@@ -192,34 +199,24 @@ function EditForm({
           ))}
         </div>
       ) : (
-        <label className="relative">
+        <div>
           <span className="mb-1 block px-1 text-xs text-muted-foreground">
             Category
           </span>
-          <select
-            value={categoryId}
-            onChange={(e) => setCategoryId(e.target.value)}
-            className={cn(field, "appearance-none pr-9")}
+          <ThemedSelect
+            ariaLabel="Category"
+            value={categoryId || null}
+            onChange={(v) => setCategoryId(v ?? "")}
             disabled={!opts}
-          >
-            <option value="">Uncategorized</option>
-            {Object.entries(grouped).map(([kind, list]) => (
-              <optgroup key={kind} label={KIND_LABEL[kind] ?? kind}>
-                {list.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.parent} · {c.name}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-3 bottom-3.5 size-4 text-muted-foreground" />
-        </label>
+            placeholder="Uncategorized"
+            options={categoryOptions(opts)}
+          />
+        </div>
       )}
 
       {/* Account + date */}
       <div className="grid grid-cols-[1fr_auto] gap-2">
-        <label className="relative">
+        <div>
           <span className="mb-1 block px-1 text-xs text-muted-foreground">
             Account
           </span>
@@ -230,24 +227,15 @@ function EditForm({
               {row.account}
             </span>
           ) : (
-            <>
-              <select
-                value={accountId}
-                onChange={(e) => setAccountId(e.target.value)}
-                className={cn(field, "appearance-none pr-9")}
-                disabled={!opts}
-              >
-                {opts?.accounts.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name}
-                    {a.last4 ? ` ••${a.last4}` : ""}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown className="pointer-events-none absolute right-3 bottom-3.5 size-4 text-muted-foreground" />
-            </>
+            <ThemedSelect
+              ariaLabel="Account"
+              value={accountId}
+              onChange={(v) => v && setAccountId(v)}
+              disabled={!opts}
+              options={(opts?.accounts ?? []).map((a) => ({ value: a.id, label: a.name, hint: a.last4 ? `••${a.last4}` : undefined }))}
+            />
           )}
-        </label>
+        </div>
         <label>
           <span className="mb-1 block px-1 text-xs text-muted-foreground">
             Date
