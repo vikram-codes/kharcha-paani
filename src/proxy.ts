@@ -10,6 +10,10 @@ const PUBLIC_PATHS = ["/login"];
  */
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  // Design mockups are viewable without a session on the local dev server only.
+  if (process.env.NODE_ENV === "development" && pathname.startsWith("/mockups/")) {
+    return NextResponse.next();
+  }
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
   if (!isSupabaseConfigured) {
