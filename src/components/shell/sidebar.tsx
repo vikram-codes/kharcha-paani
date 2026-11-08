@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Droplet, Plus } from "lucide-react";
+import { Droplet, LogOut, Plus } from "lucide-react";
+import { signOut } from "@/app/actions/auth";
 import { cn } from "@/lib/utils";
 import { isActive, sidebarSections } from "@/lib/nav";
 import { QuickAddSheet } from "./quick-add-sheet";
@@ -63,6 +64,15 @@ export function Sidebar() {
           </div>
         ))}
       </nav>
+
+      <form action={signOut} className="pt-3">
+        <button
+          type="submit"
+          className="flex h-9 w-full items-center gap-3 rounded-lg px-3 text-sm text-muted-foreground transition-colors duration-(--duration-fast) hover:bg-sidebar-accent/60 hover:text-foreground"
+        >
+          <LogOut className="size-4" strokeWidth={1.75} /> Sign out
+        </button>
+      </form>
     </aside>
   );
 }
