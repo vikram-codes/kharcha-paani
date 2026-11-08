@@ -64,7 +64,9 @@ async function Home() {
 
       {/* Balances */}
       <section className="grid gap-2 md:grid-cols-3">
-        <Tile href="/cash" icon={Wallet} label="Cash" value={h.cash} sub="Chequing · Savings · Emergency ••••" />
+        <Tile href="/cash" icon={Wallet} label="Cash" value={h.cash} sub="Chequing · Savings · Emergency ••••"
+          extra={h.owedToMe ? `+${formatCents(h.owedToMe, { whole: true })} owed to you` : undefined}
+        />
         <Tile
           href="/debts"
           icon={CreditCard}
@@ -115,17 +117,19 @@ function Tile({
   label,
   value,
   sub,
+  extra,
 }: {
   href: string;
   icon: typeof Wallet;
   label: string;
   value: number;
   sub: string;
+  extra?: string;
 }) {
   return (
     <Link
       href={href}
-      className="group flex items-center gap-4 rounded-2xl bg-surface-1 p-4 transition-colors duration-(--duration-fast) hover:bg-surface-2 active:scale-[0.99]"
+      className="group flex min-w-0 items-center gap-4 rounded-2xl bg-surface-1 p-4 transition-colors duration-(--duration-fast) hover:bg-surface-2 active:scale-[0.99]"
     >
       <span className="grid size-11 place-items-center rounded-xl bg-surface-2 text-lime-ink group-hover:bg-surface-3">
         <Icon className="size-5" />
@@ -134,6 +138,7 @@ function Tile({
         <span className="text-sm text-muted-foreground">{label}</span>
         <span className="num text-2xl font-semibold tracking-tight">{formatCents(value)}</span>
         <span className="truncate text-xs text-muted-foreground">{sub}</span>
+        {extra && <span className="num mt-0.5 truncate text-xs text-money-in">{extra}</span>}
       </span>
       <ChevronRight className="size-4 text-muted-foreground" />
     </Link>

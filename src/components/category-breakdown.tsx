@@ -8,7 +8,7 @@ import { formatShort } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
-export type BreakdownTx = { id: string; date: string; description: string; account: string; amount_cents: number; split: boolean };
+export type BreakdownTx = { id: string; date: string; reportOn?: string; description: string; account: string; amount_cents: number; split: boolean };
 
 export type BreakdownRow = {
   id: string;
@@ -81,13 +81,16 @@ export function CategoryBreakdown({ rows, className }: { rows: BreakdownRow[]; c
                     {r.txs.length === 0 && <li className="py-2 text-xs text-muted-foreground">No transactions.</li>}
                     {r.txs.map((t) => (
                       <li key={t.id} className="flex items-center gap-3 py-1.5">
-                        <span className="num w-12 shrink-0 text-[11px] text-muted-foreground">{formatShort(t.date)}</span>
+                        <span className="num w-12 shrink-0 text-[11px] text-muted-foreground">{formatShort(t.reportOn ?? t.date)}</span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[13px]">{t.description || "—"}</span>
-                          {t.account && (
+                          {(t.account || (t.reportOn && t.reportOn.slice(0, 7) !== t.date.slice(0, 7))) && (
                             <span className="flex items-center gap-1 truncate text-[11px] text-muted-foreground">
                               {t.split && <Split className="size-3" />}
                               {t.account}
+                              {t.reportOn && t.reportOn.slice(0, 7) !== t.date.slice(0, 7) && (
+                                <span className="text-lime-ink">· paid {formatShort(t.date)}, {t.date.slice(0, 4)}</span>
+                              )}
                             </span>
                           )}
                         </span>

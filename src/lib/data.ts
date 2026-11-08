@@ -90,53 +90,46 @@ async function categories(db: Db): Promise<Map<string, CategoryInfo>> {
   );
 }
 
-/** A ledger line: a transaction, or one split line of it. */
-export type LedgerRow = TxRow & { id: string; date: ISODate; description: string; account: string; split: boolean };
+/**
+ * A ledger line: a transaction, or one split line of it. `date` is when it was
+ * paid; `reportOn` is the month it counts toward (e.g. rent paid early).
+ */
+export type LedgerRow = TxRow & { id: string; date: ISODate; reportOn: ISODate; description: string; account: string; split: boolean };
 
-/** All rows dated in [start, end], with split transactions expanded into their lines. */
+const PAGE = 1000;
+
+/** All lines that REPORT in [start, end], newest first. */
 async function ledger(db: Db, start: ISODate, end: ISODate, cats: Map<string, CategoryInfo>): Promise<LedgerRow[]> {
-  const rows = ok(
-    await db
-      .from("transactions")
-      .select(
-        "id,date,description,amount_cents,is_transfer,in_reports,category_id,account:accounts!transactions_account_id_fkey(name),transaction_splits(id,category_id,amount_cents,note)",
-      )
-      .gte("date", start)
-      .lte("date", end)
-      .order("date", { ascending: false })
-      .limit(5000),
-  );
-  const out: LedgerRow[] = [];
-  for (const r of rows) {
-    const base = {
-      date: r.date as ISODate,
-      description: r.description,
-      account: r.account?.name ?? "",
-      is_transfer: r.is_transfer,
-      in_reports: r.in_reports,
-    };
-    if (r.transaction_splits.length) {
-      for (const s of r.transaction_splits) {
-        out.push({
-          ...base,
-          id: s.id,
-          split: true,
-          description: s.note ? `${r.description} · ${s.note}` : r.description,
-          amount_cents: Number(s.amount_cents),
-          category: s.category_id ? (cats.get(s.category_id) ?? null) : null,
-        });
-      }
-    } else {
-      out.push({
-        ...base,
-        id: r.id,
-        split: false,
-        amount_cents: Number(r.amount_cents),
-        category: r.category_id ? (cats.get(r.category_id) ?? null) : null,
-      });
-    }
+  // Supabase returns at most 1,000 rows per request, so page through.
+  const page = (from: number) =>
+    db
+      .from("ledger_lines")
+      .select("line_id,date,report_on,description,note,amount_cents,is_transfer,in_reports,category_id,account_id,is_split")
+      .gte("report_on", start)
+      .lte("report_on", end)
+      .order("report_on", { ascending: false })
+      .order("line_id")
+      .range(from, from + PAGE - 1)
+      .then(ok);
+  const [first, accounts] = await Promise.all([page(0), db.from("accounts").select("id,name").then(ok)]);
+  const rows = [...first];
+  for (let from = PAGE, last = first; last.length === PAGE; from += PAGE) {
+    last = await page(from);
+    rows.push(...last);
   }
-  return out;
+  const accountName = new Map(accounts.map((a) => [a.id, a.name]));
+  return rows.map((r) => ({
+    id: r.line_id!,
+    date: r.date as ISODate,
+    reportOn: r.report_on as ISODate,
+    description: r.is_split && r.note ? `${r.description} · ${r.note}` : (r.description ?? ""),
+    account: accountName.get(r.account_id!) ?? "",
+    split: Boolean(r.is_split),
+    amount_cents: Number(r.amount_cents),
+    is_transfer: Boolean(r.is_transfer),
+    in_reports: Boolean(r.in_reports),
+    category: r.category_id ? (cats.get(r.category_id) ?? null) : null,
+  }));
 }
 
 const monthLedger = (db: Db, month: MonthKey, cats: Map<string, CategoryInfo>) => {
@@ -201,14 +194,14 @@ async function upcoming(db: Db, today: ISODate, cats: Map<string, CategoryInfo>)
 const isDebt = (b: Balance) => (b.account_group === "debt_card" || b.account_group === "debt_loan") && b.key !== "student_loan";
 
 /** Rows of a category (or uncategorized) for drill-downs, newest first. Serializable. */
-export type CategoryTx = { id: string; date: ISODate; description: string; account: string; amount_cents: number; split: boolean };
+export type CategoryTx = { id: string; date: ISODate; reportOn: ISODate; description: string; account: string; amount_cents: number; split: boolean };
 
 function byCategory(rows: readonly LedgerRow[]): Record<string, CategoryTx[]> {
   const out: Record<string, CategoryTx[]> = {};
   for (const r of rows) {
     if (!r.in_reports || r.is_transfer) continue;
     const k = r.category?.id ?? "__none";
-    (out[k] ??= []).push({ id: r.id, date: r.date, description: r.description, account: r.account, amount_cents: r.amount_cents, split: r.split });
+    (out[k] ??= []).push({ id: r.id, date: r.date, reportOn: r.reportOn, description: r.description, account: r.account, amount_cents: r.amount_cents, split: r.split });
   }
   return out;
 }
@@ -219,12 +212,13 @@ export async function getHome() {
   const { db, today } = await session();
   const month = monthKey(today);
   const cats = await categories(db);
-  const [bal, rows, income, bills, lines] = await Promise.all([
+  const [bal, rows, income, bills, lines, owed] = await Promise.all([
     balances(db),
     monthLedger(db, month, cats),
     incomeSettings(db),
     upcoming(db, today, cats),
     budgetLines(db, month),
+    db.from("shared_debts").select("amount_cents").is("settled_at", null).then(ok),
   ]);
   const { end } = monthRange(month);
   const bank = bal.filter((b) => b.account_group === "cash_bank");
@@ -248,6 +242,7 @@ export async function getHome() {
     },
     investments: investments.reduce((s, b) => s + b.balance_cents, 0),
     investmentCount: investments.length,
+    owedToMe: owed.reduce((t, o) => t + Number(o.amount_cents), 0),
     upcoming: bills.slice(0, 3),
   };
 }
@@ -292,7 +287,7 @@ export async function getHistorySummary() {
   // Month by month (Dec 2024 … Dec 2025).
   const months: { month: MonthKey; income: number; spent: number }[] = [];
   for (let m = monthKey(HISTORY.start); m <= monthKey(HISTORY.end); m = monthKey(addMonths(`${m}-01`, 1))) {
-    const s = summarize(rows.filter((r) => r.date.startsWith(m)));
+    const s = summarize(rows.filter((r) => r.reportOn.startsWith(m)));
     months.push({ month: m, income: s.income, spent: s.spent });
   }
   const recorded = months.filter((m) => m.spent > 0 || m.income > 0);

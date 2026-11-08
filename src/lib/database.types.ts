@@ -655,33 +655,36 @@ export type Database = {
           amount_cents: number
           created_at: string
           id: string
+          note: string | null
           person: string
           settled_at: string | null
           settlement_transaction_id: string | null
           split_id: string | null
-          transaction_id: string
+          transaction_id: string | null
           user_id: string
         }
         Insert: {
           amount_cents: number
           created_at?: string
           id?: string
+          note?: string | null
           person: string
           settled_at?: string | null
           settlement_transaction_id?: string | null
           split_id?: string | null
-          transaction_id: string
+          transaction_id?: string | null
           user_id?: string
         }
         Update: {
           amount_cents?: number
           created_at?: string
           id?: string
+          note?: string | null
           person?: string
           settled_at?: string | null
           settlement_transaction_id?: string | null
           split_id?: string | null
-          transaction_id?: string
+          transaction_id?: string | null
           user_id?: string
         }
         Relationships: [
@@ -714,6 +717,7 @@ export type Database = {
           category_id: string | null
           id: string
           note: string | null
+          report_date: string | null
           transaction_id: string
           user_id: string
         }
@@ -722,6 +726,7 @@ export type Database = {
           category_id?: string | null
           id?: string
           note?: string | null
+          report_date?: string | null
           transaction_id: string
           user_id?: string
         }
@@ -730,6 +735,7 @@ export type Database = {
           category_id?: string | null
           id?: string
           note?: string | null
+          report_date?: string | null
           transaction_id?: string
           user_id?: string
         }
@@ -769,6 +775,7 @@ export type Database = {
           pays_account_id: string | null
           posted_date: string | null
           refund_of_id: string | null
+          report_date: string | null
           source: string
           transfer_pair_id: string | null
           updated_at: string
@@ -792,6 +799,7 @@ export type Database = {
           pays_account_id?: string | null
           posted_date?: string | null
           refund_of_id?: string | null
+          report_date?: string | null
           source: string
           transfer_pair_id?: string | null
           updated_at?: string
@@ -815,6 +823,7 @@ export type Database = {
           pays_account_id?: string | null
           posted_date?: string | null
           refund_of_id?: string | null
+          report_date?: string | null
           source?: string
           transfer_pair_id?: string | null
           updated_at?: string
@@ -897,6 +906,24 @@ export type Database = {
           hidden: boolean | null
           key: string | null
           name: string | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
+      ledger_lines: {
+        Row: {
+          account_id: string | null
+          amount_cents: number | null
+          category_id: string | null
+          date: string | null
+          description: string | null
+          in_reports: boolean | null
+          is_split: boolean | null
+          is_transfer: boolean | null
+          line_id: string | null
+          note: string | null
+          report_on: string | null
+          transaction_id: string | null
           user_id: string | null
         }
         Relationships: []

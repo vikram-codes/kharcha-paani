@@ -201,6 +201,7 @@ const txs = txRows.map((r, i) => {
     note: r.note || null,
     source: "seed",
     import_id: imp.id,
+    report_date: r.report_date || null,
     in_reports: r.in_reports === "True",
     is_transfer: r.essential === "T",
     pays_account_id: PAYS[r.category_key] ? accountId.get(PAYS[r.category_key]) : null,
@@ -216,9 +217,14 @@ for (const [i, r] of txRows.entries()) {
   if (!r.splits) continue;
   const [tx] = must(await db.from("transactions").insert(txs[i]).select("id"));
   const parts = r.splits.split("|").map((p) => {
-    const [key, amount] = p.split(":");
+    // "key:amount" or "key:amount@report-date"
+    const [key, rest] = p.split(":");
+    const [amount, reportDate] = rest.split("@");
     if (!categoryId.has(key)) fail(`Row ${i + 2}: unknown split category "${key}"`);
-    return { user_id: userId, transaction_id: tx.id, category_id: categoryId.get(key), amount_cents: parseToCents(amount) };
+    return {
+      user_id: userId, transaction_id: tx.id, category_id: categoryId.get(key),
+      amount_cents: parseToCents(amount), report_date: reportDate ?? null,
+    };
   });
   const sum = parts.reduce((t, p) => t + p.amount_cents, 0);
   if (sum !== txs[i].amount_cents) fail(`Row ${i + 2}: splits add up to ${sum}, not ${txs[i].amount_cents}`);
@@ -233,7 +239,8 @@ const bills = [
   { name: "Car insurance", note: "Triangle", account: accountId.get("triangle"), cat: "car_ins", amount: -27_958, cadence: "monthly", next: "2026-11-14" },
   { name: "Affirm", note: "Final payment", account: chq, pays: "affirm", cat: "affirm", amount: -2_490, cadence: "once", next: "2026-11-16" },
   { name: "Affirm", note: "Final payment", account: chq, pays: "affirm", cat: "affirm", amount: -10_104, cadence: "once", next: "2026-11-20" },
-  { name: "Rogers", note: "Phone & internet", account: accountId.get("triangle"), cat: "phone", amount: -13_223, cadence: "monthly", next: "2026-11-20" },
+  { name: "Rogers", note: "Phone & internet", account: accountId.get("triangle"), cat: "phone", amount: -13_223, cadence: "once", next: "2026-11-20" },
+  { name: "Rogers", note: "New plan", account: accountId.get("triangle"), cat: "phone", amount: -10_500, cadence: "monthly", next: "2026-12-20" },
   { name: "Affirm walk pad", note: "6 × $50", account: chq, pays: "affirm_walkpad", cat: "affirm", amount: -5_000, cadence: "monthly", next: "2026-11-30", end: "2027-04-30" },
   { name: "Rent", note: "Incl. utilities", account: chq, cat: "rent", amount: -70_000, cadence: "monthly", next: "2026-12-01" },
 ];
@@ -253,10 +260,11 @@ const LINES: { key: string; name: string; kind: "fixed" | "variable"; cents: num
   { key: "loan", name: "Student loan EMI", kind: "fixed", cents: 51_000, icon: "graduation-cap", color: "#A0AEC0", cats: ["student_loan"] },
   { key: "home", name: "Send home (India)", kind: "fixed", cents: 4_000, icon: "hand-coins", color: "#F6AD55", cats: ["family_india"] },
   { key: "car_ins", name: "Car insurance", kind: "fixed", cents: 27_958, icon: "shield-check", color: "#F6AD55", cats: ["car_ins"] },
-  { key: "phone", name: "Phone & internet", kind: "fixed", cents: 13_223, icon: "smartphone", color: "#4FD1C5", cats: ["phone"] },
+  { key: "phone", name: "Phone & internet", kind: "fixed", cents: 10_500, icon: "smartphone", color: "#4FD1C5", cats: ["phone"] },
   { key: "subs", name: "Subscriptions", kind: "fixed", cents: 6_718, icon: "repeat", color: "#B794F4", cats: ["subs"] },
   { key: "affirm", name: "Affirm", kind: "fixed", cents: 5_000, icon: "calendar-clock", color: "#A0AEC0", cats: ["affirm"] },
-  { key: "interest", name: "Card interest", kind: "fixed", cents: 10_390, icon: "percent", color: "#FC8181", cats: ["cc_interest"] },
+  // Estimate until the Nov 19–20 statements: Triangle $5,670 × 21.99%/12 + CIBC $2,730 × 20.99%/12.
+  { key: "interest", name: "Card interest", kind: "fixed", cents: 15_165, icon: "percent", color: "#FC8181", cats: ["cc_interest"] },
   { key: "groceries", name: "Groceries", kind: "variable", cents: 30_000, icon: "shopping-basket", color: "#B6FF3B", cats: ["groceries"] },
   { key: "eating", name: "Eating out & other", kind: "variable", cents: 30_000, icon: "utensils", color: "#F6E05E", cats: ["eating_out", "misc", "unknown", "career", "gifts_given"] },
   { key: "gas", name: "Gas & car", kind: "variable", cents: 10_000, icon: "fuel", color: "#F6AD55", cats: ["fuel", "tolls", "car_maint"] },
@@ -279,9 +287,16 @@ must(
 );
 // November 2026: Affirm's two final payments ($24.90 + $101.04) + first walk pad payment ($50).
 must(
-  await db.from("budgets").insert({
-    user_id: userId, line_id: lineId.get("affirm"), month: "2026-11-01", amount_cents: 17_594,
-    note: "Final Sep-plan payments + first walk pad payment",
+  await db.from("budgets").insert([
+    { user_id: userId, line_id: lineId.get("affirm"), month: "2026-11-01", amount_cents: 17_594, note: "Final Sep-plan payments + first walk pad payment" },
+    { user_id: userId, line_id: lineId.get("phone"), month: "2026-11-01", amount_cents: 13_223, note: "Old plan; $105 from December" },
+  ]).select("id"),
+);
+
+// Money friends owe (owner, Nov 8 2026): food, split across eating out/groceries unknown.
+must(
+  await db.from("shared_debts").insert({
+    user_id: userId, person: "Friend", amount_cents: 34_000, note: "Food (eating out + groceries, split unknown)",
   }).select("id"),
 );
 

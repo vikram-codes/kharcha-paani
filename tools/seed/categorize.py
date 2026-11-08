@@ -162,12 +162,12 @@ for c in cashew:
            "description": c["title"] or c["category name"], "source": "cashew",
            "category_key": key, "parent": parent, "sub": sub, "essential": ess,
            "confidence": "trusted", "note": c["note"], "in_reports": True, "origin": "cashew"}
-    # Owner, Nov 8: rent is reported in the month it's FOR.
+    # Owner, Nov 8: rent is reported in the month it's FOR (report date); `date` stays the payment date.
     if key == "rent" and row["date"] == "2026-01-01" and row["amount"] == -1300.0:
-        out.append({**row, "amount": -650.0, "note": "January rent (paid with April's)"})
-        row = {**row, "date": "2026-04-01", "amount": -650.0, "note": "April rent, paid Jan 1 as 'last month'"}
+        row = {**row, "category_key": "", "splits": "rent:-650.00@2026-01-01|rent:-650.00@2026-04-01",
+               "note": "First & last month: January + April rent"}
     elif key == "rent" and row["date"] == "2026-04-22" and row["amount"] == -700.0:
-        row = {**row, "date": "2026-05-01", "note": "Paid Apr 22 when moving; counts for May (new place)"}
+        row = {**row, "report_date": "2026-05-01", "note": "Paid Apr 22 when moving; rent for May (new place)"}
     out.append(row)
 
 # Money Pro history Dec 2024 - Nov 2025 (owner's previous app).
@@ -194,15 +194,23 @@ if MONEYPRO:
         amt = float(m["Amount"].replace("$", "").replace(",", ""))
         key = moneypro_key(m)
         parent, sub, ess = CATS[key]
-        out.append({"account": "moneypro_legacy", "date": date, "amount": amt if kind == "Income" else -amt,
-                    "description": m["Description"] or m["Category"], "source": "moneypro",
-                    "category_key": key, "parent": parent, "sub": sub, "essential": ess,
-                    "confidence": "trusted", "note": "", "in_reports": True, "origin": "moneypro"})
+        row = {"account": "moneypro_legacy", "date": date, "amount": amt if kind == "Income" else -amt,
+               "description": m["Description"] or m["Category"], "source": "moneypro",
+               "category_key": key, "parent": parent, "sub": sub, "essential": ess,
+               "confidence": "trusted", "note": "", "in_reports": True, "origin": "moneypro"}
+        # Owner, Nov 8: May 31 "Misc" held May + Aug rent ($600 each) and May car insurance ($276).
+        if date == "2025-05-31" and key == "misc" and amt == 1913.35:
+            row = {**row, "category_key": "", "note": "Owner: includes May + Aug rent and May car insurance",
+                   "splits": "rent:-600.00@2025-05-01|rent:-600.00@2025-08-01|car_ins:-276.00|misc:-437.35"}
+        # The Aug 26 rent ($1,300) was for September.
+        elif date == "2025-08-26" and key == "rent" and amt == 1300.0:
+            row = {**row, "report_date": "2025-09-01", "note": "Paid Aug 26; rent for September"}
+        out.append(row)
 
 out.sort(key=lambda x: (x["date"], x["account"]))
 with open(OUT / "transactions.csv", "w", newline="") as f:
     w = csv.DictWriter(f, fieldnames=["date", "posted", "account", "amount", "description", "parent", "sub",
-                                      "essential", "category_key", "splits", "confidence", "note", "in_reports", "origin", "source"])
+                                      "essential", "category_key", "splits", "report_date", "confidence", "note", "in_reports", "origin", "source"])
     w.writeheader()
     for x in out: w.writerow({k: x.get(k, "") for k in w.fieldnames})
 json.dump({k: {"parent": v[0], "sub": v[1], "essential": v[2]} for k, v in CATS.items()},

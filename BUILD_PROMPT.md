@@ -77,6 +77,12 @@ The app has three top-level groups. Accounts are grouped by **what the money is*
 
 **Student loan facts (owner, Nov 8, 2026):** sanctioned ₹24L at 9.5% from the start; ₹18L disbursed Jan 2025, the remaining ₹6L in Jul 2025. First EMI was Oct 2026 (₹34,070). **The EMI is counted as $510 CAD/month**; any extra in a Remitly transfer is "Send home (India)" (Family, fixed). Remitly transfers before Oct 2026 were money for home, and the Oct 22, 2026 $500 was gifts for family. These facts make the later "total interest since approval" figure possible.
 
+**Report month vs. payment date (decided Nov 8, 2026).** A transaction or split line can carry a `report_date`: summaries and budgets count it in that month, while lists keep the real payment date (shown as "paid <date>"). Used for rent paid ahead (and anything similar). The `ledger_lines` view returns one row per transaction or split line with `report_on`.
+
+**2025 corrections (owner):** the May 31, 2025 Money Pro "Misc" $1,913.35 = May rent $600 + August rent $600 + May car insurance $276 + misc $437.35. The Aug 26, 2025 rent $1,300 counts for September. Money Pro stops Nov 8, 2025 and Cashew starts Jan 1, 2026; Nov 9 – Dec 31, 2025 wasn't tracked (the Dec 31 $1,700 "Misc" is an adjustment, excluded).
+
+**Owed to the owner:** $340 from a friend for food (split between eating out and groceries unknown), stored as an open `shared_debts` row without a transaction. When it's repaid it's a friend payback (not income).
+
 **Rent history (owner):** Jan–Apr 2026 $650 incl. utilities (only Mar had $19 extra); Jan's $1,300 = Jan + Apr (Apr is reported in Apr). New place from May: $650 + utilities; the $700 paid Apr 22 counts for May (May shows both). $700 incl. utilities from Sep. One month's rent is held as a deposit.
 
 **Which account pays what (confirmed from Aug–Oct data):** everything goes on a credit card (raises Debts, doesn't touch Cash) **except rent, Affirm and the student loan (Remitly)**, which come out of chequing. Quick-add defaults follow this. Tax refunds and government benefits are deposited to chequing, so they're part of Cash.
@@ -257,12 +263,13 @@ Tapping a tile opens its section:
 | Student loan EMI | $510.00 | Eating out & other (+ misc, gifts, career) | $300 |
 | Send home (India) | $40.00 | Gas & car (fuel, parking, maintenance) | $100 |
 | Car insurance | $279.58 | Shopping & personal care (+ household, health) | $100 |
-| Phone & internet | $132.23 (last bill) | Fun (entertainment, travel, gym) | $200 |
+| Phone & internet | $105.00 from Dec 2026 ($132.23 in Nov) | Fun (entertainment, travel, gym) | $200 |
 | Subscriptions (now **fixed**) | $67.18 | | |
 | Affirm | $50 ($175.94 in Nov 2026) | | |
-| Card interest | ~$103.90 (Triangle at 21.99%) | | |
+| Card interest | ~$151.65 estimate: Triangle 21.99% + CIBC 20.99% (update from the Nov 19–20 statements) | | |
 
 - A fixed line paid exactly as planned is "Paid ✓", not red; it only turns red when it costs more than planned. Variable lines use the §7.3 bands.
+- The owner pays the cards down gradually: track interest as a cost, don't give payoff advice.
 - The Home hero compares **spent this month vs. the month's total budget** (it replaced planned income).
 
 ### 7.8 Savings goals
