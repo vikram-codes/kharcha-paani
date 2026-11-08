@@ -58,7 +58,7 @@ async function Loan() {
       <section className="rounded-2xl bg-surface-1 p-4">
         <h2 className="mb-3 text-sm font-medium text-muted-foreground">Every month at {l.apr}% a year</h2>
         <Row label={`Interest added ${formatShort(l.nextInterestDate)}`} value={`+${formatCents(l.nextInterest)}`} tone="warn" />
-        <Row label="Your payment (Remitly, 10th)" value={`−${formatCents(l.monthlyPayment)}`} />
+        <Row label="EMI (₹34,070, counted as CAD)" value={`−${formatCents(l.monthlyPayment)}`} />
         <div className="my-2 border-t border-border" />
         <Row
           label="Goes to the loan itself"
@@ -81,7 +81,7 @@ async function Loan() {
 
       {l.payments.length > 0 && (
         <section className="rounded-2xl bg-surface-1 p-4">
-          <h2 className="mb-1 text-sm font-medium text-muted-foreground">Payments</h2>
+          <h2 className="mb-1 text-sm font-medium text-muted-foreground">EMI payments</h2>
           <ul className="divide-y divide-border">
             {l.payments.map((p, i) => (
               <li key={i} className="flex items-center justify-between py-2.5 text-sm">

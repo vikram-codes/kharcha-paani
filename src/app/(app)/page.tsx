@@ -1,9 +1,9 @@
-import { Suspense } from "react";
 import Link from "next/link";
 import { ChevronRight, CreditCard, TrendingUp, Wallet } from "lucide-react";
 import { CategoryChip } from "@/components/category-icon";
+import { Reveal } from "@/components/reveal";
 import { Skeleton } from "@/components/ui/skeleton";
-import { bandColorVar, budgetBand } from "@/lib/budget";
+import { bandColorVar } from "@/lib/budget";
 import { daysBetween, formatDay, formatMonthName, formatShort } from "@/lib/dates";
 import { getHome } from "@/lib/data";
 import { formatCents } from "@/lib/money";
@@ -11,20 +11,20 @@ import { formatCents } from "@/lib/money";
 export default function HomePage() {
   return (
     <div className="mx-auto flex max-w-md flex-col gap-5 md:max-w-3xl">
-      <Suspense fallback={<HomeSkeleton />}>
+      <Reveal fallback={<HomeSkeleton />}>
         <Home />
-      </Suspense>
+      </Reveal>
     </div>
   );
 }
 
 async function Home() {
   const h = await getHome();
-  const pct = h.plannedIncome ? Math.round((h.spent / h.plannedIncome) * 100) : null;
-  const color = h.plannedIncome ? bandColorVar[budgetBand(h.spent, h.plannedIncome)] : "var(--lime)";
+  const pct = h.budget ? Math.round((h.spent / h.budget) * 100) : null;
+  const color = bandColorVar[h.band];
 
   return (
-    <>
+    <div className="flex flex-col gap-5">
       {/* Hero: total spent this month → Summary */}
       <Link
         href={`/summary/${h.month}`}
@@ -39,10 +39,11 @@ async function Home() {
         <p className="num mt-2 text-[44px] leading-none font-semibold tracking-tight">
           {formatCents(h.spent, { whole: true })}
         </p>
-        {h.plannedIncome && (
+        {h.budget > 0 && (
           <>
             <p className="num mt-2 text-sm text-muted-foreground">
-              of {formatCents(h.plannedIncome, { whole: true })} planned income · {pct}%
+              of {formatCents(h.budget, { whole: true })} budget · {pct}%
+              {h.spent <= h.budget && <> · {formatCents(h.budget - h.spent, { whole: true })} left</>}
             </p>
             <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-surface-3">
               <div className="h-full rounded-full" style={{ width: `${Math.min(100, pct ?? 0)}%`, background: color }} />
@@ -104,7 +105,7 @@ async function Home() {
           </div>
         </section>
       )}
-    </>
+    </div>
   );
 }
 
@@ -141,7 +142,7 @@ function Tile({
 
 function HomeSkeleton() {
   return (
-    <>
+    <div className="flex flex-col gap-5">
       <Skeleton className="h-[188px] rounded-3xl" />
       <div className="grid gap-2 md:grid-cols-3">
         <Skeleton className="h-[92px] rounded-2xl" />
@@ -149,6 +150,6 @@ function HomeSkeleton() {
         <Skeleton className="h-[92px] rounded-2xl" />
       </div>
       <Skeleton className="h-[170px] rounded-2xl" />
-    </>
+    </div>
   );
 }

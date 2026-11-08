@@ -1,6 +1,6 @@
 """Categorize parsed statement rows + Cashew history into one seed dataset.
 
-Usage: python3 -I categorize.py rows.json cashew.csv out_dir
+Usage: python3 -I categorize.py rows.json cashew.csv out_dir [moneypro.csv]
 """
 import csv, json, re, sys
 from pathlib import Path
@@ -9,13 +9,15 @@ from collections import defaultdict
 rows = json.load(open(sys.argv[1]))
 cashew = list(csv.DictReader(open(sys.argv[2])))
 OUT = Path(sys.argv[3]); OUT.mkdir(parents=True, exist_ok=True)
+MONEYPRO = sys.argv[4] if len(sys.argv) > 4 else None
 
 # (parent, sub, essential) essential: F=fixed, V=variable, ''=discretionary
 CATS = {
  "rent": ("Housing", "Rent (incl. utilities)", "F"),
  "phone": ("Bills", "Phone & internet (Rogers)", "F"),
  "car_ins": ("Car", "Insurance", "F"),
- "student_loan": ("Debt payments", "Student loan (India, via Remitly)", "F"),
+ "student_loan": ("Debt payments", "Student loan EMI", "F"),
+ "family_india": ("Family", "Send home (India)", "F"),
  "groceries": ("Food", "Groceries", "V"),
  "fuel": ("Car", "Fuel", "V"),
  "car_maint": ("Car", "Maintenance & parts", "V"),
@@ -25,8 +27,9 @@ CATS = {
  "affirm": ("Debt payments", "Affirm (pay-later)", "F"),
  "eating_out": ("Food", "Eating out", ""),
  "gym": ("Health", "Gym & fitness", ""),
- "subs": ("Subscriptions", "Apps & streaming", ""),
+ "subs": ("Subscriptions", "Apps & streaming", "F"),  # owner, Nov 8: subscriptions are a fixed monthly cost
  "haircut": ("Personal care", "Haircut", ""),
+ "toiletries": ("Personal care", "Toiletries & cosmetics", ""),
  "household": ("Home", "Household supplies", ""),
  "home": ("Home", "Furniture & electronics", ""),
  "shopping": ("Shopping", "Clothing & general", ""),
@@ -42,6 +45,7 @@ CATS = {
  "benefits": ("Income", "Government benefits & tax refunds", "I"),
  "gift_in": ("Income", "Gifts received", "I"),
  "income_other": ("Income", "Other income", "I"),
+ "gic": ("Income", "GIC payouts", "I"),
  # transfers
  "cc_payment": ("Transfer", "Credit card payment", "T"),
  "savings_xfer": ("Transfer", "Chequing ↔ savings", "T"),
@@ -86,6 +90,14 @@ RENT_GUESSES = {("2026-08-01", -650.00): "confirmed: rent $650 (before Sep, util
                 ("2026-09-02", -700.00): "confirmed: rent $700 incl. utilities from Sep",
                 ("2026-10-01", -700.00): "confirmed: rent $700 incl. utilities"}
 
+# Remitly sends to India. Only the scheduled EMI (from Oct 2026, counted as $510 CAD) pays
+# the loan; everything else is money for home/family. Split = "key:amount|key:amount".
+REMITLY = {
+    ("2026-09-08", -206.88): ("family_india", "", "Owner: home bills / money for Indian bank account, before EMIs started"),
+    ("2026-10-10", -520.00): (None, "student_loan:-510.00|family_india:-10.00", "Owner: first EMI ($510) + $10 sent home"),
+    ("2026-10-22", -500.00): ("gifts_given", "", "Owner: gifts for family from first salary, not a loan payment"),
+}
+
 CUTOFF = "2026-08-01"  # Cashew is trusted before this date; statements after
 out = []
 for r in rows:
@@ -107,13 +119,17 @@ for r in rows:
         for pat, k in RULES:
             if re.search(pat, desc, re.I):
                 key = k; break
+    split = ""
+    if (r["date"], r["amount"]) in REMITLY:
+        rkey, split, note = REMITLY[(r["date"], r["amount"])]
+        key, conf = rkey or "student_loan", "confirmed"
     if key is None:
         key, conf = "misc", "unmatched"
     if key == "groceries" and "WALMART.CA" in desc:
         note = "Walmart: groceries by default (Cashew history); may include household"
     parent, sub, ess = CATS[key]
-    out.append({**r, "category_key": key, "parent": parent, "sub": sub, "essential": ess,
-                "confidence": conf, "note": note,
+    out.append({**r, "category_key": "" if split else key, "parent": parent, "sub": sub, "essential": ess,
+                "confidence": conf, "note": note, "splits": split,
                 "in_reports": r["date"] >= CUTOFF,  # pre-Aug card rows only feed balances
                 "origin": "statement"})
 
@@ -142,15 +158,51 @@ for c in cashew:
     if c["category name"] == "Income" and c["title"] == "Starting Point": skipped["'Starting Point' opening balance (not income)"] += 1; continue
     key = cashew_key(c)
     parent, sub, ess = CATS[key]
-    out.append({"account": "cashew_legacy", "date": c["date"][:10], "amount": float(c["amount"]),
-                "description": c["title"] or c["category name"], "source": "cashew",
-                "category_key": key, "parent": parent, "sub": sub, "essential": ess,
-                "confidence": "trusted", "note": c["note"], "in_reports": True, "origin": "cashew"})
+    row = {"account": "cashew_legacy", "date": c["date"][:10], "amount": float(c["amount"]),
+           "description": c["title"] or c["category name"], "source": "cashew",
+           "category_key": key, "parent": parent, "sub": sub, "essential": ess,
+           "confidence": "trusted", "note": c["note"], "in_reports": True, "origin": "cashew"}
+    # Owner, Nov 8: rent is reported in the month it's FOR.
+    if key == "rent" and row["date"] == "2026-01-01" and row["amount"] == -1300.0:
+        out.append({**row, "amount": -650.0, "note": "January rent (paid with April's)"})
+        row = {**row, "date": "2026-04-01", "amount": -650.0, "note": "April rent, paid Jan 1 as 'last month'"}
+    elif key == "rent" and row["date"] == "2026-04-22" and row["amount"] == -700.0:
+        row = {**row, "date": "2026-05-01", "note": "Paid Apr 22 when moving; counts for May (new place)"}
+    out.append(row)
+
+# Money Pro history Dec 2024 - Nov 2025 (owner's previous app).
+MONEYPRO_MAP = {"Dining": "eating_out", "Groceries": "groceries", "Car: Fuel": "fuel", "Business income": "side",
+                "Misc": "misc", "Car: Maintenance": "car_maint", "Car: Other": "car_maint", "Personal: Fitness": "gym",
+                "Insurance": "car_ins", "Home: Rent": "rent", "Salary": "salary", "Utilities: Cell Phone": "phone",
+                "Shopping: Clothing": "shopping", "Shopping: Other": "shopping", "Shopping: Books": "shopping",
+                "Personal: Toiletries / Cosmetics": "toiletries", "Personal: Hair care": "haircut", "Apps": "subs",
+                "Shopping: Electronics": "home", "Home: Furniture / Accessories": "home", "Household": "household",
+                "Home: Other": "household", "Education": "career", "Car: Parking and tolls": "tolls",
+                "Leisure": "entertainment"}
+def moneypro_key(m):
+    cat, desc, income = m["Category"], m["Description"], m["Transaction Type"] == "Income"
+    if cat == "Other": return "benefits" if "tax" in desc.lower() else "gic"
+    if cat == "Gifts": return "gift_in" if income else "gifts_given"
+    if cat == "Misc" and desc == "Visa Appointment": return "career"
+    if cat == "Misc" and "gift" in desc.lower(): return "gifts_given"
+    return MONEYPRO_MAP[cat]
+if MONEYPRO:
+    for m in csv.DictReader(open(MONEYPRO, encoding="utf-8-sig")):
+        kind, date = m["Transaction Type"], m["Date"][:10]
+        if kind == "Opening Balance": skipped["Money Pro opening balance"] += 1; continue
+        if date == "2025-12-31" and m["Category"] == "Misc": skipped["Money Pro year-end adjustment"] += 1; continue
+        amt = float(m["Amount"].replace("$", "").replace(",", ""))
+        key = moneypro_key(m)
+        parent, sub, ess = CATS[key]
+        out.append({"account": "moneypro_legacy", "date": date, "amount": amt if kind == "Income" else -amt,
+                    "description": m["Description"] or m["Category"], "source": "moneypro",
+                    "category_key": key, "parent": parent, "sub": sub, "essential": ess,
+                    "confidence": "trusted", "note": "", "in_reports": True, "origin": "moneypro"})
 
 out.sort(key=lambda x: (x["date"], x["account"]))
 with open(OUT / "transactions.csv", "w", newline="") as f:
     w = csv.DictWriter(f, fieldnames=["date", "posted", "account", "amount", "description", "parent", "sub",
-                                      "essential", "category_key", "confidence", "note", "in_reports", "origin", "source"])
+                                      "essential", "category_key", "splits", "confidence", "note", "in_reports", "origin", "source"])
     w.writeheader()
     for x in out: w.writerow({k: x.get(k, "") for k in w.fieldnames})
 json.dump({k: {"parent": v[0], "sub": v[1], "essential": v[2]} for k, v in CATS.items()},

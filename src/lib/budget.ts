@@ -30,3 +30,52 @@ export function crossedThresholds(before: Cents, after: Cents, budget: Cents): (
   }
   return out;
 }
+
+export type BudgetLineDef = {
+  id: string;
+  key: string;
+  name: string;
+  kind: "fixed" | "variable";
+  icon: string | null;
+  color: string | null;
+  /** This month's budget (override, else the line's default). */
+  budget: Cents;
+  categoryIds: string[];
+};
+
+export type BudgetLineStatus = BudgetLineDef & { spent: Cents; band: BudgetBand; pct: number; paid: boolean };
+
+/**
+ * Budget vs actual per line (§7.7). `spentByCategory` is positive spending per
+ * category id (refunds already netted). Spending in categories that belong to
+ * no line is reported as `unbudgeted`.
+ */
+export function budgetStatus(lines: readonly BudgetLineDef[], spentByCategory: ReadonlyMap<string, Cents>) {
+  const covered = new Set<string>();
+  const out: BudgetLineStatus[] = lines.map((l) => {
+    let spent = 0;
+    for (const c of l.categoryIds) {
+      covered.add(c);
+      spent += spentByCategory.get(c) ?? 0;
+    }
+    // A fixed bill paid in full is expected, not a warning: it only turns red when it costs MORE than planned.
+    const band = l.kind === "fixed" ? (spent > l.budget ? "over" : "ok") : budgetBand(spent, l.budget);
+    const paid = l.kind === "fixed" && l.budget > 0 && spent >= l.budget;
+    return { ...l, spent, band, paid, pct: l.budget > 0 ? Math.round((spent / l.budget) * 100) : 0 };
+  });
+  let unbudgeted = 0;
+  for (const [c, cents] of spentByCategory) if (!covered.has(c)) unbudgeted += cents;
+  const sum = (k: "fixed" | "variable", f: "budget" | "spent") =>
+    out.filter((l) => l.kind === k).reduce((t, l) => t + l[f], 0);
+  const budget = out.reduce((t, l) => t + l.budget, 0);
+  const spent = out.reduce((t, l) => t + l.spent, 0) + unbudgeted;
+  return {
+    lines: out,
+    fixed: { budget: sum("fixed", "budget"), spent: sum("fixed", "spent") },
+    variable: { budget: sum("variable", "budget"), spent: sum("variable", "spent") },
+    unbudgeted,
+    budget,
+    spent,
+    band: budgetBand(spent, budget),
+  };
+}
