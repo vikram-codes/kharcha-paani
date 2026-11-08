@@ -584,3 +584,60 @@ export async function changeEmergencyPin(current: string, next: string): Promise
   );
   return { ok: true };
 }
+
+// ───────────────────────────── activity (transactions list) ─────────────────────────────
+
+export type ActivityRow = {
+  id: string;
+  date: ISODate;
+  amount_cents: number;
+  description: string;
+  note: string | null;
+  account: string;
+  accountGroup: string;
+  source: string;
+  isTransfer: boolean;
+  category: Pick<CategoryInfo, "id" | "name" | "parentName" | "icon" | "color" | "kind"> | null;
+  /** Category names when the transaction is split. */
+  splits: { name: string; amount_cents: number }[];
+};
+
+/** Transactions paid in a month (by payment date), newest first, plus upcoming bills. */
+export async function getActivity(month?: MonthKey) {
+  const { db, today } = await session();
+  const m = month ?? monthKey(today);
+  const { start, end } = monthRange(m);
+  const cats = await categories(db);
+  const [rows, bills] = await Promise.all([
+    db
+      .from("transactions")
+      .select(
+        "id,date,description,note,amount_cents,is_transfer,in_reports,source,category_id,account:accounts!transactions_account_id_fkey(name,account_group),transaction_splits(category_id,amount_cents)",
+      )
+      .gte("date", start)
+      .lte("date", end)
+      .eq("in_reports", true)
+      .order("date", { ascending: false })
+      .order("created_at", { ascending: false })
+      .limit(1000)
+      .then(ok),
+    m === monthKey(today) ? upcoming(db, today, cats) : Promise.resolve([]),
+  ]);
+  const list: ActivityRow[] = rows.map((r) => {
+    const c = r.category_id ? cats.get(r.category_id) : undefined;
+    return {
+      id: r.id,
+      date: r.date as ISODate,
+      amount_cents: Number(r.amount_cents),
+      description: r.description,
+      note: r.note,
+      account: r.account?.name ?? "",
+      accountGroup: r.account?.account_group ?? "",
+      source: r.source,
+      isTransfer: r.is_transfer || c?.kind === "transfer",
+      category: c ? { id: c.id, name: c.name, parentName: c.parentName, icon: c.icon, color: c.color, kind: c.kind } : null,
+      splits: r.transaction_splits.map((s) => ({ name: (s.category_id && cats.get(s.category_id)?.name) || "Uncategorized", amount_cents: Number(s.amount_cents) })),
+    };
+  });
+  return { month: m, today, rows: list, upcoming: bills };
+}
