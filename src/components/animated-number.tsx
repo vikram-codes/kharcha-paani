@@ -15,7 +15,7 @@ export function AnimatedCents({
   whole,
   signed,
   className,
-  duration = 0.6,
+  duration = 1.5,
 }: {
   value: number;
   whole?: boolean;
