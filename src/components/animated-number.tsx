@@ -1,22 +1,21 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { animate, useReducedMotion } from "motion/react";
 import { formatCents } from "@/lib/money";
 
-const noop = () => () => {};
-
 /**
- * Money that counts to its value. Server-rendered (hydrated) numbers appear as
- * they are, so a page never flashes $0; numbers rendered in the browser (data
- * that just arrived, a month switch) count up, or roll from the old value.
+ * Money that counts up to its value when it first appears (page load or data
+ * arriving) and rolls from the old value when it changes (e.g. switching
+ * months). Server HTML starts at $0 too, so the first frame and hydration agree
+ * and the count starts the moment the content fades in.
  */
 export function AnimatedCents({
   value,
   whole,
   signed,
   className,
-  duration = 0.5,
+  duration = 0.6,
 }: {
   value: number;
   whole?: boolean;
@@ -24,29 +23,31 @@ export function AnimatedCents({
   className?: string;
   duration?: number;
 }) {
-  // true only while hydrating server HTML
-  const hydrating = useSyncExternalStore(noop, () => false, () => true);
   const reduce = useReducedMotion();
   const ref = useRef<HTMLSpanElement>(null);
-  const shown = useRef<number | null>(null);
+  // The number currently on screen (mid-animation included).
+  const displayed = useRef(0);
   const fmt = (c: number) => formatCents(Math.round(c), { whole, signed });
-  // The text React renders never changes after mount; the effect drives it, so
-  // re-renders can't snap the number back mid-animation.
-  const [initialText] = useState(() => fmt(hydrating ? value : 0));
+  // React only ever renders this initial text; the effect drives the number
+  // afterwards, so re-renders can't snap it back mid-animation.
+  const [initialText] = useState(() => fmt(0));
 
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const from = shown.current ?? (hydrating ? value : 0);
-    shown.current = value;
+    // Start from what's on screen, not the last target: a re-run (React dev
+    // double-invokes effects; a month switch mid-count) then continues smoothly.
+    const from = displayed.current;
     if (reduce || from === value) {
+      displayed.current = value;
       el.textContent = fmt(value);
       return;
     }
     const controls = animate(from, value, {
       duration,
-      ease: [0.2, 0.8, 0.2, 1],
+      ease: [0.16, 1, 0.3, 1], // fast start, soft landing
       onUpdate: (v) => {
+        displayed.current = v;
         el.textContent = fmt(v);
       },
     });
@@ -55,7 +56,7 @@ export function AnimatedCents({
   }, [value]);
 
   return (
-    <span ref={ref} className={className} suppressHydrationWarning>
+    <span ref={ref} className={className}>
       {initialText}
     </span>
   );

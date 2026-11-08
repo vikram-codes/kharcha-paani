@@ -224,7 +224,7 @@ export async function getHome() {
   const { db, today } = await session();
   const month = monthKey(today);
   const cats = await categories(db);
-  const [bal, rows, income, bills, lines, owed, prof] = await Promise.all([
+  const [bal, rows, income, bills, lines, owed, prof, emergencyMeta] = await Promise.all([
     balances(db),
     monthLedger(db, month, cats),
     incomeSettings(db),
@@ -232,6 +232,7 @@ export async function getHome() {
     budgetLines(db, month),
     db.from("shared_debts").select("amount_cents").is("settled_at", null).then(ok),
     profile(db),
+    db.from("accounts").select("institution").eq("account_group", "cash_emergency").limit(1).maybeSingle().then(okMaybe),
   ]);
   const { end } = monthRange(month);
   const bank = bal.filter((b) => b.account_group === "cash_bank");
@@ -260,10 +261,14 @@ export async function getHome() {
     investments: investments.reduce((s, b) => s + b.balance_cents, 0),
     investmentCount: investments.length,
     owedToMe: owed.reduce((t, o) => t + Number(o.amount_cents), 0),
-    // Cash breakdown; the emergency fund's amount stays hidden until revealed (§3.1).
+    emergencyInstitution: emergencyMeta?.institution ?? null,
+    // Cash breakdown. The emergency fund's amount is never sent here: it needs the PIN.
     cashAccounts: bal
       .filter((b) => b.account_group === "cash_bank" || b.account_group === "cash_emergency")
-      .map((b) => ({ id: b.account_id, name: b.name, cents: b.hidden ? null : b.balance_cents, emergency: b.account_group === "cash_emergency" })),
+      .map((b) => {
+        const emergency = b.account_group === "cash_emergency";
+        return { id: b.account_id, name: b.name, cents: emergency || b.hidden ? null : b.balance_cents, emergency };
+      }),
     upcoming: bills.slice(0, 3),
   };
 }
@@ -503,4 +508,79 @@ export async function createManualTransaction(input: NewTransaction) {
   );
   ok(await db.from("profiles").update({ last_account_id: account.id }).not("user_id", "is", null).select("user_id"));
   return { account: account.name, category: category.name, amountCents: amount };
+}
+
+// ───────────────────────────── cash + emergency fund ─────────────────────────────
+
+export async function getCash() {
+  const { db } = await session();
+  const [bal, meta, owed] = await Promise.all([
+    balances(db),
+    db.from("accounts").select("id,institution,last4").in("account_group", ["cash_bank", "cash_emergency"]).then(ok),
+    db.from("shared_debts").select("amount_cents").is("settled_at", null).then(ok),
+  ]);
+  const info = new Map(meta.map((m) => [m.id, m]));
+  const bank = bal
+    .filter((b) => b.account_group === "cash_bank")
+    .map((b) => ({ id: b.account_id, name: b.name, cents: b.balance_cents, institution: info.get(b.account_id)?.institution ?? null, last4: info.get(b.account_id)?.last4 ?? null }));
+  const emergency = bal.find((b) => b.account_group === "cash_emergency");
+  return {
+    bank,
+    bankTotal: bank.reduce((t, b) => t + b.cents, 0),
+    // Never the amount: that needs the PIN.
+    emergency: emergency ? { id: emergency.account_id, name: emergency.name, institution: info.get(emergency.account_id)?.institution ?? null } : null,
+    owedToMe: owed.reduce((t, o) => t + Number(o.amount_cents), 0),
+  };
+}
+
+const PIN_MAX_TRIES = 5;
+const PIN_LOCK_MINUTES = 5;
+
+export type UnlockResult = { ok: true; cents: number } | { ok: false; error: string };
+
+/** Checks the emergency PIN; on success returns the emergency fund balance. */
+export async function unlockEmergencyFund(pin: string): Promise<UnlockResult> {
+  const { db } = await authed();
+  const { isValidPin, verifyPin } = await import("./pin");
+  const p = okMaybe(await db.from("profiles").select("user_id,emergency_pin_hash,pin_failed_count,pin_locked_until").maybeSingle());
+  if (!p?.emergency_pin_hash) return { ok: false, error: "Set a PIN in Settings first." };
+  if (p.pin_locked_until && Date.parse(p.pin_locked_until) > Date.now()) {
+    const mins = Math.ceil((Date.parse(p.pin_locked_until) - Date.now()) / 60_000);
+    return { ok: false, error: `Too many tries. Try again in ${mins} min.` };
+  }
+  if (!isValidPin(pin) || !verifyPin(pin, p.emergency_pin_hash)) {
+    const fails = p.pin_failed_count + 1;
+    const lock = fails >= PIN_MAX_TRIES;
+    ok(
+      await db
+        .from("profiles")
+        .update({ pin_failed_count: lock ? 0 : fails, pin_locked_until: lock ? new Date(Date.now() + PIN_LOCK_MINUTES * 60_000).toISOString() : null })
+        .eq("user_id", p.user_id)
+        .select("user_id"),
+    );
+    return { ok: false, error: lock ? `Too many tries. Locked for ${PIN_LOCK_MINUTES} min.` : "Wrong PIN." };
+  }
+  if (p.pin_failed_count || p.pin_locked_until) {
+    ok(await db.from("profiles").update({ pin_failed_count: 0, pin_locked_until: null }).eq("user_id", p.user_id).select("user_id"));
+  }
+  const em = ok(await db.from("account_balances").select("balance_cents").eq("account_group", "cash_emergency"));
+  return { ok: true, cents: em.reduce((t, r) => t + Number(r.balance_cents), 0) };
+}
+
+export async function changeEmergencyPin(current: string, next: string): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { db } = await authed();
+  const { hashPin, isValidPin, verifyPin } = await import("./pin");
+  if (!isValidPin(next)) return { ok: false, error: "The new PIN must be 4–6 digits." };
+  const p = okMaybe(await db.from("profiles").select("user_id,emergency_pin_hash,pin_locked_until").maybeSingle());
+  if (!p) return { ok: false, error: "Profile not found." };
+  if (p.pin_locked_until && Date.parse(p.pin_locked_until) > Date.now()) return { ok: false, error: "PIN is locked for a few minutes. Try again soon." };
+  if (p.emergency_pin_hash && !verifyPin(current, p.emergency_pin_hash)) return { ok: false, error: "Current PIN is wrong." };
+  ok(
+    await db
+      .from("profiles")
+      .update({ emergency_pin_hash: hashPin(next), pin_failed_count: 0, pin_locked_until: null })
+      .eq("user_id", p.user_id)
+      .select("user_id"),
+  );
+  return { ok: true };
 }

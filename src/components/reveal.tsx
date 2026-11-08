@@ -1,21 +1,14 @@
-import { Suspense, ViewTransition, type ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 
 /**
- * Suspense boundary whose skeleton slides out and real content slides in
- * (React <ViewTransition>, browser View Transitions API). No-op where unsupported.
+ * Suspense boundary for a screen's data. The skeleton shows until data arrives,
+ * then the content fades up with a plain CSS animation (no View Transitions:
+ * those snapshot the page and can flash a blank frame).
  */
 export function Reveal({ fallback, children }: { fallback: ReactNode; children: ReactNode }) {
   return (
-    <Suspense
-      fallback={
-        <ViewTransition exit="vt-skeleton-out" default="none">
-          <div>{fallback}</div>
-        </ViewTransition>
-      }
-    >
-      <ViewTransition enter="vt-content-in" default="none">
-        <div>{children}</div>
-      </ViewTransition>
+    <Suspense fallback={fallback}>
+      <div className="kp-reveal">{children}</div>
     </Suspense>
   );
 }

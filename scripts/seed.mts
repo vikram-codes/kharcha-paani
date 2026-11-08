@@ -5,6 +5,7 @@
  *   npm run seed -- --email=you@example.com          # refuses if data exists
  *   npm run seed -- --email=you@example.com --reset  # wipes that user's data first
  */
+import { randomBytes, scryptSync } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { parseCsvObjects } from "../src/lib/csv.ts";
@@ -295,7 +296,15 @@ must(
 );
 
 // Profile: greeting + headline monthly budget (owner: keep it at a round $3,000).
-must(await db.from("profiles").upsert({ user_id: userId, display_name: "Vikram", monthly_budget_cents: 300_000 }).select("user_id"));
+// Emergency fund PIN starts as 0000 (dev); change it in Settings. Same format as src/lib/pin.ts.
+const salt = randomBytes(16);
+const pinHash = ["scrypt", salt.toString("hex"), scryptSync("0000", salt, 32).toString("hex")].join(":");
+must(
+  await db
+    .from("profiles")
+    .upsert({ user_id: userId, display_name: "Vikram", monthly_budget_cents: 300_000, emergency_pin_hash: pinHash })
+    .select("user_id"),
+);
 
 // Money friends owe (owner, Nov 8 2026): food, split across eating out/groceries unknown.
 must(

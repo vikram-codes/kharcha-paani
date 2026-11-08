@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { ChevronRight, CreditCard, TrendingUp, Wallet } from "lucide-react";
+import { ChevronRight, CreditCard, TrendingUp } from "lucide-react";
 import { AnimatedCents } from "@/components/animated-number";
+import { CashCard } from "@/components/cash-card";
 import { CategoryChip } from "@/components/category-icon";
 import { HomeTile } from "@/components/home-tile";
 import { Reveal } from "@/components/reveal";
@@ -10,6 +11,11 @@ import { daysBetween, formatDay, formatMonthName, formatShort } from "@/lib/date
 import { getHome } from "@/lib/data";
 import { formatCents } from "@/lib/money";
 
+/**
+ * Home (owner picked the Cash-first layout, Nov 8 2026): Cash hero (emergency
+ * fund behind a PIN), this month's spending vs budget → Summary, Debts and
+ * Investments, then upcoming bills.
+ */
 export default function HomePage() {
   return (
     <div className="mx-auto flex max-w-md flex-col gap-5 md:max-w-3xl">
@@ -22,8 +28,8 @@ export default function HomePage() {
 
 async function Home() {
   const h = await getHome();
-  const pct = h.budget ? Math.round((h.spent / h.budget) * 100) : null;
-  const color = bandColorVar[h.band];
+  const pct = h.budget ? Math.round((h.spent / h.budget) * 100) : 0;
+  const left = h.budget - h.spent;
 
   return (
     <div className="flex flex-col gap-5">
@@ -35,46 +41,36 @@ async function Home() {
         </h1>
       </header>
 
-      {/* Hero: total spent this month → Summary */}
-      <Link
-        href={`/summary/${h.month}`}
-        className="group block rounded-3xl bg-surface-1 p-5 ring-1 ring-border transition-transform duration-(--duration-fast) active:scale-[0.99]"
-      >
+      {/* Hero: Cash */}
+      <CashCard
+        bankTotal={h.cash}
+        accounts={h.cashAccounts}
+        emergencyInstitution={h.emergencyInstitution}
+        owedToMe={h.owedToMe}
+        paydayLabel={h.nextPayday ? formatDay(h.nextPayday) : null}
+      />
+
+      {/* Budget → this month's summary */}
+      <Link href={`/summary/${h.month}`} className="group block rounded-2xl bg-surface-1 p-4 transition-colors duration-(--duration-fast) hover:bg-surface-2">
         <div className="flex items-center justify-between">
-          <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
-            Spent in {formatMonthName(h.month)}
-          </p>
-          <ChevronRight className="size-4 text-muted-foreground transition-transform duration-(--duration-fast) group-hover:translate-x-0.5" />
-        </div>
-        <AnimatedCents value={h.spent} whole className="num mt-2 block text-[44px] leading-none font-semibold tracking-tight" />
-        {h.budget > 0 && (
-          <>
-            <p className="num mt-2 text-sm text-muted-foreground">
-              of {formatCents(h.budget, { whole: true })} budget · {pct}%
-              {h.spent <= h.budget && <> · {formatCents(h.budget - h.spent, { whole: true })} left</>}
-            </p>
-            <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-surface-3">
-              <div className="h-full rounded-full" style={{ width: `${Math.min(100, pct ?? 0)}%`, background: color }} />
-            </div>
-          </>
-        )}
-        <div className="mt-4 flex justify-between border-t border-border pt-3 text-xs font-medium text-muted-foreground">
-          <span>
-            {h.daysLeft} {h.daysLeft === 1 ? "day" : "days"} left
+          <span className="text-sm text-muted-foreground">Spent in {formatMonthName(h.month)}</span>
+          <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            {pct}% <ChevronRight className="size-4" />
           </span>
-          {h.nextPayday && (
-            <span>
-              Payday <span className="text-foreground">{formatDay(h.nextPayday)}</span>
-            </span>
-          )}
         </div>
+        <p className="mt-1 flex items-baseline gap-1.5">
+          <AnimatedCents value={h.spent} whole className="num text-3xl font-semibold tracking-tight" />
+          <span className="num text-sm text-muted-foreground">of {formatCents(h.budget, { whole: true })}</span>
+        </p>
+        <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface-3">
+          <div className="h-full rounded-full transition-[width] duration-500" style={{ width: `${Math.min(100, pct)}%`, background: bandColorVar[h.band] }} />
+        </div>
+        <p className="num mt-2 text-xs text-muted-foreground">
+          {left >= 0 ? `${formatCents(left, { whole: true })} left` : `${formatCents(-left, { whole: true })} over`} · {h.daysLeft} days left
+        </p>
       </Link>
 
-      {/* Balances */}
-      <section className="grid gap-2 md:grid-cols-3">
-        <HomeTile href="/cash" icon={Wallet} label="Cash" value={h.cash} sub="Chequing · Savings · Emergency ••••"
-          extra={h.owedToMe ? `${formatCents(h.owedToMe, { whole: true })} owed to you · not in Cash` : undefined}
-        />
+      <section className="grid gap-2 md:grid-cols-2">
         <HomeTile
           href="/debts"
           icon={CreditCard}
@@ -91,7 +87,6 @@ async function Home() {
         />
       </section>
 
-      {/* Coming up */}
       {h.upcoming.length > 0 && (
         <section>
           <h2 className="mb-1 px-1 text-sm font-medium text-muted-foreground">Coming up</h2>
@@ -122,9 +117,13 @@ async function Home() {
 function HomeSkeleton() {
   return (
     <div className="flex flex-col gap-5">
-      <Skeleton className="h-[188px] rounded-3xl" />
-      <div className="grid gap-2 md:grid-cols-3">
-        <Skeleton className="h-[92px] rounded-2xl" />
+      <div className="flex flex-col gap-2 px-1">
+        <Skeleton className="h-4 w-24 rounded" />
+        <Skeleton className="h-7 w-56 rounded-lg" />
+      </div>
+      <Skeleton className="h-[218px] rounded-3xl" />
+      <Skeleton className="h-[134px] rounded-2xl" />
+      <div className="grid gap-2 md:grid-cols-2">
         <Skeleton className="h-[92px] rounded-2xl" />
         <Skeleton className="h-[92px] rounded-2xl" />
       </div>

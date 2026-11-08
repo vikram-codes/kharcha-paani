@@ -55,7 +55,7 @@ The app has three top-level groups. Accounts are grouped by **what the money is*
 | Sub-group | Accounts | Notes |
 |---|---|---|
 | **Bank accounts** | Scotiabank chequing (…2089, main account: salary in, bills and card payments out), Scotiabank savings (…5454) | As of Nov 7, 2026 all money is in chequing, and savings is $0 |
-| **Emergency fund** | **Simplii Financial** savings account | **Hidden by default.** Shown as `••••` with a reveal tap. When revealed, shows the amount and "Simplii Financial". Starts at $0. |
+| **Emergency fund** | **Simplii Financial** savings account | **Hidden behind a PIN** (decided Nov 8, 2026). Shown as `••••`; tapping asks for the PIN (keypad sheet). Only after the PIN checks out is the amount fetched from the server, shown, and **added to the Cash total** (Home and /cash). Hides again on tap or reload. PIN: 4–6 digits, salted scrypt hash in `profiles`, 5 wrong tries → locked 5 min, changed in Settings. Dev PIN: 0000. Starts at $0. |
 
 - The Cash total on the Home screen **never subtracts debt**.
 
@@ -227,7 +227,9 @@ discretionary_left  = discretionary_pool − discretionary_spent
 | ≥ 100% | Red |
 
 ### 7.4 Home screen
-**Mobile (decided Nov 8, 2026 from mockups: C's card shape + B's tiles; no bright-filled surfaces):**
+**Mobile, updated Nov 8, 2026: Cash-first.** Greeting, then a **Cash hero card** (total, chips per account, emergency fund behind the PIN, "$X owed to you" greyed, next payday), then **"Spent in <month>" of the $3,000 budget** (bar, left, days left → this month's Summary), then Debts and Investments tiles, then Coming up. Money figures count up on load.
+
+_Earlier version (superseded):_ **Mobile (decided Nov 8, 2026 from mockups: C's card shape + B's tiles; no bright-filled surfaces):**
 1. **Hero card** (dark surface, not lime-filled): the big number is **total spent this month** (all expense categories, essentials included; transfers and friend paybacks excluded). Under it: "of $X planned income", a thin progress bar colored per §7.3, and a footer with days left in the month on the left and the **next payday on the right**. No "$/day" figure. **Tapping it opens this month's Summary** (§7.10): a full income-vs-expenses page with month navigation.
 2. **Three big tiles** (B style): Cash, Debts, Investments, each with its total and a one-line breakdown. Cash = bank accounts; the emergency fund stays masked (`••••`).
 3. **Coming up:** the next 3 upcoming payments (greyed, §6).

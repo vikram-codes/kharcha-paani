@@ -438,22 +438,31 @@ export type Database = {
       profiles: {
         Row: {
           display_name: string | null
+          emergency_pin_hash: string | null
           last_account_id: string | null
           monthly_budget_cents: number | null
+          pin_failed_count: number
+          pin_locked_until: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
           display_name?: string | null
+          emergency_pin_hash?: string | null
           last_account_id?: string | null
           monthly_budget_cents?: number | null
+          pin_failed_count?: number
+          pin_locked_until?: string | null
           updated_at?: string
           user_id?: string
         }
         Update: {
           display_name?: string | null
+          emergency_pin_hash?: string | null
           last_account_id?: string | null
           monthly_budget_cents?: number | null
+          pin_failed_count?: number
+          pin_locked_until?: string | null
           updated_at?: string
           user_id?: string
         }
