@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import Link from "next/link";
 import { ChevronDown, History } from "lucide-react";
 import { ResponsiveSheetContent } from "@/components/ui/responsive-sheet";
 import { Sheet, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
@@ -25,12 +24,15 @@ export function MonthPicker({
   subtitle,
   selected,
   history,
+  onSelect,
 }: {
   title: string;
   subtitle?: string;
   /** "YYYY-MM", or the history key. */
   selected: string;
   history: { key: string; label: string };
+  /** Switch to a month in place (no page navigation). */
+  onSelect: (key: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState<{ current: string; months: { month: string; spent: number }[] } | null>(null);
@@ -92,10 +94,13 @@ export function MonthPicker({
                     );
                   }
                   return (
-                    <Link
+                    <button
+                      type="button"
                       key={key}
-                      href={`/summary/${key}`}
-                      onClick={() => setOpen(false)}
+                      onClick={() => {
+                        setOpen(false);
+                        onSelect(key);
+                      }}
                       aria-current={isSel ? "page" : undefined}
                       className={cn(
                         "relative flex h-14 flex-col items-center justify-center rounded-xl bg-surface-1 transition-colors duration-(--duration-fast) hover:bg-surface-2",
@@ -105,25 +110,28 @@ export function MonthPicker({
                       <span className="text-sm font-medium">{label}</span>
                       <span className="num text-[11px] text-muted-foreground">{compact(spent.get(key) ?? 0)}</span>
                       {isNow && <span className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-lime" aria-label="This month" />}
-                    </Link>
+                    </button>
                   );
                 })}
               </div>
             </section>
           ))}
 
-          <Link
-            href={`/summary/${history.key}`}
-            onClick={() => setOpen(false)}
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onSelect(history.key);
+            }}
             className={cn(
-              "mt-5 flex items-center gap-3 rounded-xl bg-surface-1 px-4 py-3 transition-colors duration-(--duration-fast) hover:bg-surface-2",
+              "mt-5 flex w-full items-center gap-3 rounded-xl bg-surface-1 px-4 py-3 transition-colors duration-(--duration-fast) hover:bg-surface-2",
               selected === history.key && "ring-2 ring-lime",
             )}
           >
             <History className="size-4 text-muted-foreground" />
             <span className="flex-1 text-sm font-medium">{history.label}</span>
             <span className="text-xs text-muted-foreground">Money Pro history</span>
-          </Link>
+          </button>
         </div>
       </ResponsiveSheetContent>
     </Sheet>

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { ChevronRight, CreditCard, TrendingUp, Wallet } from "lucide-react";
+import { AnimatedCents } from "@/components/animated-number";
 import { CategoryChip } from "@/components/category-icon";
+import { HomeTile } from "@/components/home-tile";
 import { Reveal } from "@/components/reveal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bandColorVar } from "@/lib/budget";
@@ -44,9 +46,7 @@ async function Home() {
           </p>
           <ChevronRight className="size-4 text-muted-foreground transition-transform duration-(--duration-fast) group-hover:translate-x-0.5" />
         </div>
-        <p className="num mt-2 text-[44px] leading-none font-semibold tracking-tight">
-          {formatCents(h.spent, { whole: true })}
-        </p>
+        <AnimatedCents value={h.spent} whole className="num mt-2 block text-[44px] leading-none font-semibold tracking-tight" />
         {h.budget > 0 && (
           <>
             <p className="num mt-2 text-sm text-muted-foreground">
@@ -72,17 +72,17 @@ async function Home() {
 
       {/* Balances */}
       <section className="grid gap-2 md:grid-cols-3">
-        <Tile href="/cash" icon={Wallet} label="Cash" value={h.cash} sub="Chequing · Savings · Emergency ••••"
+        <HomeTile href="/cash" icon={Wallet} label="Cash" value={h.cash} sub="Chequing · Savings · Emergency ••••"
           extra={h.owedToMe ? `${formatCents(h.owedToMe, { whole: true })} owed to you · not in Cash` : undefined}
         />
-        <Tile
+        <HomeTile
           href="/debts"
           icon={CreditCard}
           label="Debts"
           value={h.debts}
           sub={`${h.debtCounts.cards} cards${h.debtCounts.plans ? ` · ${h.debtCounts.plans} Affirm plans` : ""}`}
         />
-        <Tile
+        <HomeTile
           href="/investments"
           icon={TrendingUp}
           label="Investments"
@@ -116,41 +116,6 @@ async function Home() {
         </section>
       )}
     </div>
-  );
-}
-
-function Tile({
-  href,
-  icon: Icon,
-  label,
-  value,
-  sub,
-  extra,
-}: {
-  href: string;
-  icon: typeof Wallet;
-  label: string;
-  value: number;
-  sub: string;
-  extra?: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="group relative flex min-w-0 items-center gap-4 rounded-2xl bg-surface-1 p-4 transition-colors duration-(--duration-fast) hover:bg-surface-2 active:scale-[0.99] md:flex-col md:items-stretch md:gap-4 md:p-5"
-    >
-      {/* Mobile: icon · text · chevron in a row. Desktop (3 columns): icon on top, chevron in the corner. */}
-      <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-surface-2 text-lime-ink group-hover:bg-surface-3">
-        <Icon className="size-5" />
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="text-sm text-muted-foreground">{label}</span>
-        <span className="num truncate text-2xl font-semibold tracking-tight">{formatCents(value)}</span>
-        <span className="truncate text-xs text-muted-foreground">{sub}</span>
-        {extra && <span className="num mt-0.5 truncate text-xs text-muted-foreground/60">{extra}</span>}
-      </span>
-      <ChevronRight className="size-4 shrink-0 text-muted-foreground md:absolute md:top-5 md:right-5" />
-    </Link>
   );
 }
 

@@ -42,9 +42,8 @@ function okMaybe<R extends Res>(res: R): R["data"] {
   return res.data;
 }
 
-/** First month with full data in the app; earlier history is one combined Money Pro period. */
-export const FIRST_MONTH: MonthKey = "2026-01";
-export const HISTORY = { key: "2025", start: "2024-12-01", end: "2025-12-31", label: "2024–2025" } as const;
+import { FIRST_MONTH, HISTORY } from "./periods";
+export { FIRST_MONTH, HISTORY };
 
 // ───────────────────────────── building blocks ─────────────────────────────
 
@@ -261,6 +260,10 @@ export async function getHome() {
     investments: investments.reduce((s, b) => s + b.balance_cents, 0),
     investmentCount: investments.length,
     owedToMe: owed.reduce((t, o) => t + Number(o.amount_cents), 0),
+    // Cash breakdown; the emergency fund's amount stays hidden until revealed (§3.1).
+    cashAccounts: bal
+      .filter((b) => b.account_group === "cash_bank" || b.account_group === "cash_emergency")
+      .map((b) => ({ id: b.account_id, name: b.name, cents: b.hidden ? null : b.balance_cents, emergency: b.account_group === "cash_emergency" })),
     upcoming: bills.slice(0, 3),
   };
 }
@@ -272,6 +275,11 @@ export async function getHome() {
 export async function getMonthSummary(month: MonthKey) {
   "use cache: private";
   cacheLife({ stale: 300, revalidate: 300, expire: 3600 });
+  return monthSummaryData(month);
+}
+
+/** Uncached month summary: used by the cached page read and by the in-page month switcher. */
+export async function monthSummaryData(month: MonthKey) {
   const { db, today } = await authed();
   const cats = await categories(db);
   const prev = monthKey(addMonths(`${month}-01`, -1));
@@ -302,6 +310,10 @@ export async function getMonthSummary(month: MonthKey) {
 export async function getHistorySummary() {
   "use cache: private";
   cacheLife({ stale: 300, revalidate: 3600, expire: 86_400 });
+  return historySummaryData();
+}
+
+export async function historySummaryData() {
   const { db } = await authed();
   const cats = await categories(db);
   const rows = await ledger(db, HISTORY.start, HISTORY.end, cats);
