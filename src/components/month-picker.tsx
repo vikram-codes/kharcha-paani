@@ -1,9 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import { ChevronDown, History } from "lucide-react";
-import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { ResponsiveSheetContent } from "@/components/ui/responsive-sheet";
+import { Sheet, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { loadMonthIndex } from "@/app/actions/summary";
 import { cn } from "@/lib/utils";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -22,24 +24,29 @@ export function MonthPicker({
   title,
   subtitle,
   selected,
-  current,
-  months,
   history,
 }: {
   title: string;
   subtitle?: string;
   /** "YYYY-MM", or the history key. */
   selected: string;
-  current: string;
-  months: { month: string; spent: number }[];
   history: { key: string; label: string };
 }) {
   const [open, setOpen] = useState(false);
+  const [index, setIndex] = useState<{ current: string; months: { month: string; spent: number }[] } | null>(null);
+  const [loading, startLoading] = useTransition();
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    // Lazy: month totals are fetched the first time the picker opens.
+    if (next && !index) startLoading(async () => setIndex(await loadMonthIndex()));
+  };
+  const months = index?.months ?? [];
+  const current = index?.current ?? "";
   const spent = new Map(months.map((m) => [m.month, m.spent]));
   const years = [...new Set(months.map((m) => m.month.slice(0, 4)))].sort().reverse();
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetTrigger
         render={
           <button
@@ -56,12 +63,18 @@ export function MonthPicker({
         {subtitle && <span className="text-xs text-muted-foreground">{subtitle}</span>}
       </SheetTrigger>
 
-      <SheetContent side="bottom" className="mx-auto max-w-lg rounded-t-3xl border-border pb-safe md:bottom-6 md:rounded-3xl md:border">
-        <div className="mx-auto mt-2 h-1 w-10 rounded-full bg-surface-3 md:hidden" />
-        <div className="px-5 pt-2 pb-6">
+      <ResponsiveSheetContent>
+        <div className="px-5 pt-2 pb-6 md:pt-5">
           <SheetTitle className="text-lg font-semibold">Jump to a month</SheetTitle>
           <SheetDescription className="text-xs">Spending shown under each month.</SheetDescription>
 
+          {(loading || !index) && (
+            <div className="mt-5 grid grid-cols-4 gap-2" aria-busy>
+              {Array.from({ length: 12 }, (_, i) => (
+                <span key={i} className="h-14 animate-pulse rounded-xl bg-surface-1" />
+              ))}
+            </div>
+          )}
           {years.map((y) => (
             <section key={y} className="mt-5">
               <h3 className="mb-2 text-xs font-medium tracking-wider text-muted-foreground uppercase">{y}</h3>
@@ -112,7 +125,7 @@ export function MonthPicker({
             <span className="text-xs text-muted-foreground">Money Pro history</span>
           </Link>
         </div>
-      </SheetContent>
+      </ResponsiveSheetContent>
     </Sheet>
   );
 }

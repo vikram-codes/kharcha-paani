@@ -241,7 +241,8 @@ Tapping a tile opens its section:
 
 ### 7.5 Quick-add (the center + button)
 - Opens straight to an **amount keypad**, then a grid of recent and frequent categories, then save. The target is **under 5 seconds**.
-- Optional fields behind a "more" toggle: merchant, account (defaults to the most-used card), date (defaults to today), note, split, friend owes.
+- **"Paid from" dropdown with 4 options: Scotiabank chequing, Scene+ Visa, Costco CIBC, Triangle. It always defaults to the last account used** (`profiles.last_account_id`, saved on every add). Also on the sheet: Expense / Money in toggle, date (today), note. Later: merchant, split, friend owes.
+- Bottom sheet on phones, centered dialog on desktop (same for the Summary month picker). Desktop: type the amount, Enter saves.
 - As fast as Cashew's quick-add, or faster.
 
 ### 7.6 Transactions

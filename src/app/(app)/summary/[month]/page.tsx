@@ -1,4 +1,6 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
+import { connection } from "next/server";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowDownRight, ArrowUpRight, ChevronLeft, ChevronRight, History } from "lucide-react";
@@ -8,8 +10,8 @@ import { Reveal } from "@/components/reveal";
 import { SegmentRing } from "@/components/ring";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bandColorVar } from "@/lib/budget";
-import { formatMonth, formatShort, isMonthKey, shiftMonth } from "@/lib/dates";
-import { FIRST_MONTH, HISTORY, getHistorySummary, getMonthIndex, getMonthSummary, type CategoryTx } from "@/lib/data";
+import { formatMonth, formatShort, isMonthKey, monthKey, shiftMonth, todayISO } from "@/lib/dates";
+import { FIRST_MONTH, HISTORY, getHistorySummary, getMonthSummary, type CategoryTx } from "@/lib/data";
 import { formatCents } from "@/lib/money";
 import type { CategoryTotal, MonthSummary } from "@/lib/summary";
 import { cn } from "@/lib/utils";
@@ -18,13 +20,50 @@ export const metadata: Metadata = { title: "Summary" };
 
 type Params = PageProps<"/summary/[month]">["params"];
 
+/**
+ * The header (title, arrows, month picker) needs no data, so it renders right
+ * away; only the numbers below wait, behind a skeleton that slides into the
+ * real content. Neighbouring months are prefetched.
+ */
 export default function SummaryPage({ params }: PageProps<"/summary/[month]">) {
   return (
-    <div className="mx-auto max-w-md md:max-w-3xl">
+    <div className="mx-auto flex max-w-md flex-col gap-5 md:max-w-3xl">
+      <Suspense fallback={<NavSkeleton />}>
+        <Nav params={params} />
+      </Suspense>
       <Reveal fallback={<SummarySkeleton />}>
         <Summary params={params} />
       </Reveal>
     </div>
+  );
+}
+
+async function Nav({ params }: { params: Params }) {
+  const { month } = await params;
+  await connection();
+  const current = monthKey(todayISO());
+  if (month === HISTORY.key) {
+    return (
+      <MonthNav
+        selected={HISTORY.key}
+        title={HISTORY.label}
+        subtitle="Dec 2024 – Dec 2025 · Money Pro"
+        prevHref={null}
+        nextHref={`/summary/${FIRST_MONTH}`}
+        nextLabel={formatMonth(FIRST_MONTH)}
+      />
+    );
+  }
+  if (!isMonthKey(month) || month < FIRST_MONTH) return <NavSkeleton />;
+  return (
+    <MonthNav
+      selected={month}
+      title={formatMonth(month)}
+      subtitle={month === current ? "So far this month" : undefined}
+      prevHref={month === FIRST_MONTH ? `/summary/${HISTORY.key}` : `/summary/${shiftMonth(month, -1)}`}
+      prevLabel={month === FIRST_MONTH ? HISTORY.label : undefined}
+      nextHref={month >= current ? null : `/summary/${shiftMonth(month, 1)}`}
+    />
   );
 }
 
@@ -40,28 +79,14 @@ async function Summary({ params }: { params: Params }) {
 
 // ───────────────────────────── one month ─────────────────────────────
 
-type MonthIndex = Awaited<ReturnType<typeof getMonthIndex>>;
-
 async function MonthView({ month }: { month: string }) {
-  const [d, index] = await Promise.all([getMonthSummary(month), getMonthIndex()]);
+  const d = await getMonthSummary(month);
   const s = d.summary;
   const b = d.budget;
   const empty = s.spent === 0 && s.income === 0 && s.adjustments === 0;
-  const prevHref = month === FIRST_MONTH ? `/summary/${HISTORY.key}` : `/summary/${shiftMonth(month, -1)}`;
-  const nextDisabled = d.isCurrent || d.isFuture;
 
   return (
     <div className="flex flex-col gap-5">
-      <MonthNav
-        index={index}
-        selected={month}
-        title={formatMonth(month)}
-        subtitle={d.isCurrent ? "So far this month" : undefined}
-        prevHref={prevHref}
-        prevLabel={month === FIRST_MONTH ? HISTORY.label : undefined}
-        nextHref={nextDisabled ? null : `/summary/${shiftMonth(month, 1)}`}
-      />
-
       {empty ? (
         <p className="rounded-2xl bg-surface-1 p-8 text-center text-sm text-muted-foreground">Nothing recorded for {formatMonth(month)} yet.</p>
       ) : (
@@ -121,21 +146,11 @@ async function MonthView({ month }: { month: string }) {
 // ───────────────────────────── Dec 2024 – Dec 2025 ─────────────────────────────
 
 async function HistoryView() {
-  const [h, index] = await Promise.all([getHistorySummary(), getMonthIndex()]);
+  const h = await getHistorySummary();
   const s = h.summary;
 
   return (
     <div className="flex flex-col gap-5">
-      <MonthNav
-        index={index}
-        selected={HISTORY.key}
-        title={HISTORY.label}
-        subtitle="Dec 2024 – Dec 2025 · Money Pro"
-        prevHref={null}
-        nextHref={`/summary/${FIRST_MONTH}`}
-        nextLabel={formatMonth(FIRST_MONTH)}
-      />
-
       <section className="rounded-3xl bg-surface-1 p-5 ring-1 ring-border">
         <div className="grid grid-cols-2 gap-4">
           <Stat label="Income" value={s.income} tone="in" />
@@ -171,7 +186,6 @@ async function HistoryView() {
 // ───────────────────────────── shared pieces ─────────────────────────────
 
 function MonthNav({
-  index,
   selected,
   title,
   subtitle,
@@ -180,7 +194,6 @@ function MonthNav({
   nextHref,
   nextLabel,
 }: {
-  index: MonthIndex;
   selected: string;
   title: string;
   subtitle?: string;
@@ -207,8 +220,6 @@ function MonthNav({
           title={title}
           subtitle={subtitle}
           selected={selected}
-          current={index.current}
-          months={index.months}
           history={{ key: HISTORY.key, label: HISTORY.label }}
         />
       </h1>
@@ -366,10 +377,19 @@ function Mini({ label, spent, budget }: { label: string; spent: number; budget: 
   );
 }
 
+function NavSkeleton() {
+  return (
+    <div className="flex items-center justify-between">
+      <Skeleton className="size-10 rounded-xl" />
+      <Skeleton className="h-6 w-40 rounded-lg" />
+      <Skeleton className="size-10 rounded-xl" />
+    </div>
+  );
+}
+
 function SummarySkeleton() {
   return (
     <div className="flex flex-col gap-5">
-      <Skeleton className="h-10 rounded-xl" />
       <Skeleton className="h-[200px] rounded-3xl" />
       <Skeleton className="h-[120px] rounded-2xl" />
       <Skeleton className="h-[360px] rounded-2xl" />

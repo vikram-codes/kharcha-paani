@@ -317,10 +317,8 @@ export async function getHistorySummary() {
   };
 }
 
-/** Spent per month since FIRST_MONTH, for the month picker. */
+/** Spent per month since FIRST_MONTH, for the month picker (loaded when it opens). */
 export async function getMonthIndex() {
-  "use cache: private";
-  cacheLife({ stale: 300, revalidate: 300, expire: 3600 });
   const { db, today } = await authed();
   const cats = await categories(db);
   const current = monthKey(today);
@@ -424,4 +422,73 @@ async function getLoanFor(db: Db, today: ISODate, bal: Balance[]) {
     fxRate: snap.fx_rate != null ? Number(snap.fx_rate) : null,
     anchorDate: snap.as_of as ISODate,
   };
+}
+
+// ───────────────────────────── quick-add ─────────────────────────────
+
+/** Accounts you can pay from in quick-add: chequing + the credit cards. */
+const SPEND_GROUPS = ["cash_bank", "debt_card"];
+
+export async function getQuickAddOptions() {
+  const { db, today } = await authed();
+  const since = addMonths(today, -3);
+  const [accounts, cats, recent, prof] = await Promise.all([
+    db.from("accounts").select("id,key,name,account_group,last4,sort_order").in("account_group", SPEND_GROUPS).eq("archived", false).order("sort_order").then(ok),
+    categories(db),
+    db.from("transactions").select("category_id").gte("date", since).not("category_id", "is", null).limit(1000).then(ok),
+    db.from("profiles").select("last_account_id").maybeSingle().then(okMaybe),
+  ]);
+  // Savings accounts aren't where purchases come from.
+  const payFrom = accounts.filter((a) => a.account_group === "debt_card" || a.key.includes("chequing"));
+  const uses = new Map<string, number>();
+  for (const r of recent) uses.set(r.category_id!, (uses.get(r.category_id!) ?? 0) + 1);
+  const pick = (kind: CategoryInfo["kind"]) =>
+    [...cats.values()]
+      .filter((c) => c.kind === kind && c.parentName) // subcategories only
+      .map((c) => ({ id: c.id, name: c.name, parent: c.parentName, icon: c.icon, color: c.color, uses: uses.get(c.id) ?? 0 }))
+      .sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name));
+  const lastAccountId = prof?.last_account_id && payFrom.some((a) => a.id === prof.last_account_id) ? prof.last_account_id : null;
+  return {
+    today,
+    accounts: payFrom.map((a) => ({ id: a.id, name: a.name, last4: a.last4 })),
+    lastAccountId: lastAccountId ?? payFrom.find((a) => a.account_group === "debt_card")?.id ?? payFrom[0]?.id ?? null,
+    expense: pick("expense"),
+    income: pick("income"),
+  };
+}
+
+export type NewTransaction = {
+  kind: "expense" | "income";
+  amountCents: number;
+  accountId: string;
+  categoryId: string;
+  date: ISODate;
+  note?: string;
+};
+
+/** Saves a manual entry. Expenses are negative (card purchase → debt up; chequing → cash down). */
+export async function createManualTransaction(input: NewTransaction) {
+  const { db } = await authed();
+  if (!Number.isInteger(input.amountCents) || input.amountCents <= 0 || input.amountCents > 100_000_000) {
+    throw new Error("Enter an amount above $0.");
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new Error("Pick a valid date.");
+  const note = input.note?.trim().slice(0, 200) || null;
+  // RLS limits both lookups to the owner's rows, so foreign ids simply aren't found.
+  const [account, category] = await Promise.all([
+    db.from("accounts").select("id,name,account_group").eq("id", input.accountId).in("account_group", SPEND_GROUPS).maybeSingle().then(okMaybe),
+    db.from("categories").select("id,name,kind").eq("id", input.categoryId).maybeSingle().then(okMaybe),
+  ]);
+  if (!account) throw new Error("Choose where it was paid from.");
+  if (!category || category.kind !== input.kind) throw new Error("Choose a category.");
+  const amount = input.kind === "expense" ? -input.amountCents : input.amountCents;
+  ok(
+    await db
+      .from("transactions")
+      .insert({ account_id: account.id, category_id: category.id, date: input.date, amount_cents: amount, description: note ?? category.name, note, source: "manual" })
+      .select("id")
+      .single(),
+  );
+  ok(await db.from("profiles").update({ last_account_id: account.id }).not("user_id", "is", null).select("user_id"));
+  return { account: account.name, category: category.name, amountCents: amount };
 }

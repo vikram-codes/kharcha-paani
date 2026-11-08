@@ -438,23 +438,41 @@ export type Database = {
       profiles: {
         Row: {
           display_name: string | null
+          last_account_id: string | null
           monthly_budget_cents: number | null
           updated_at: string
           user_id: string
         }
         Insert: {
           display_name?: string | null
+          last_account_id?: string | null
           monthly_budget_cents?: number | null
           updated_at?: string
           user_id?: string
         }
         Update: {
           display_name?: string | null
+          last_account_id?: string | null
           monthly_budget_cents?: number | null
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "profiles_last_account_id_fkey"
+            columns: ["last_account_id"]
+            isOneToOne: false
+            referencedRelation: "account_balances"
+            referencedColumns: ["account_id"]
+          },
+          {
+            foreignKeyName: "profiles_last_account_id_fkey"
+            columns: ["last_account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       recurring_series: {
         Row: {
