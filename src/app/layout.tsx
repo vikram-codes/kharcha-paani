@@ -15,10 +15,10 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: { default: "Ledger", template: "%s · Ledger" },
+  title: { default: "Kharcha-Paani", template: "%s · Kharcha-Paani" },
   description: "Personal money: cash, debts, investments and what's left to spend.",
-  applicationName: "Ledger",
-  appleWebApp: { capable: true, title: "Ledger", statusBarStyle: "black-translucent" },
+  applicationName: "Kharcha-Paani",
+  appleWebApp: { capable: true, title: "Kharcha", statusBarStyle: "black-translucent" },
   formatDetection: { telephone: false },
 };
 

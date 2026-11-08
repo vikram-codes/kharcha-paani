@@ -20,7 +20,7 @@ export default function HomePage() {
           <Link
             key={href}
             href={href}
-            className="group flex items-center gap-4 rounded-2xl bg-surface-1 p-4 transition-colors duration-[var(--duration-fast)] hover:bg-surface-2 active:scale-[0.99]"
+            className="group flex items-center gap-4 rounded-2xl bg-surface-1 p-4 transition-colors duration-(--duration-fast) hover:bg-surface-2 active:scale-[0.99]"
           >
             <span className="grid size-10 place-items-center rounded-xl bg-surface-2 text-lime-ink group-hover:bg-surface-3">
               <Icon className="size-5" />

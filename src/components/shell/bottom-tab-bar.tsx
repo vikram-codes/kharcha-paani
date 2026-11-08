@@ -25,7 +25,7 @@ function Tab({ item, active }: { item: NavItem; active: boolean }) {
       )}
       <Icon
         className={cn(
-          "size-[22px] transition-colors duration-[var(--duration-fast)]",
+          "size-[22px] transition-colors duration-(--duration-fast)",
           active ? "text-foreground" : "text-muted-foreground",
         )}
         strokeWidth={active ? 2.25 : 1.75}

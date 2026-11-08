@@ -3,8 +3,8 @@ import type { MetadataRoute } from "next";
 /** Installable PWA (§2). PNG icons + offline shell + push arrive in phase 9. */
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Ledger",
-    short_name: "Ledger",
+    name: "Kharcha-Paani",
+    short_name: "Kharcha-Paani",
     description: "Cash, debts, investments and what's left to spend.",
     start_url: "/",
     display: "standalone",

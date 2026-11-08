@@ -1,4 +1,4 @@
-# Ledger: personal expense tracker
+# Kharcha-Paani: personal expense tracker
 
 Mobile-first PWA for cash, debts, investments and what's left to spend this month.
 The full spec is in [BUILD_PROMPT.md](BUILD_PROMPT.md).
