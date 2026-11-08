@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { LogOut, ShieldCheck } from "lucide-react";
+import Link from "next/link";
+import { ChevronRight, FileUp, LogOut, ShieldCheck } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
 import { ChangePinForm } from "@/components/change-pin-form";
 
@@ -22,6 +23,17 @@ export default function SettingsPage() {
         </div>
         <ChangePinForm />
       </section>
+
+      <Link href="/imports" className="flex items-center gap-3 rounded-2xl bg-surface-1 p-4 transition-colors duration-(--duration-fast) hover:bg-surface-2">
+        <span className="grid size-10 place-items-center rounded-xl bg-surface-2 text-lime-ink">
+          <FileUp className="size-[18px]" />
+        </span>
+        <span className="flex-1">
+          <span className="block text-sm font-medium">Import a statement</span>
+          <span className="block text-xs text-muted-foreground">Upload a PDF from Scotiabank, CIBC or Triangle</span>
+        </span>
+        <ChevronRight className="size-4 text-muted-foreground" />
+      </Link>
 
       <form action={signOut}>
         <button

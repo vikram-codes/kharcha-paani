@@ -135,6 +135,8 @@ Rules baked into the seed (keep them in the app):
 
 Ongoing importers still need to handle CSV downloads from each bank. When the first one is uploaded, read its exact columns. Don't guess formats.
 
+**Built Nov 8, 2026: PDF statement import** (`/imports`, owner chose built-in parsers over Claude extraction). pdf.js text → column layout (`src/lib/import/pdf-text.ts`) → per-bank parsers (`statements.ts`) checked against each statement's own totals → duplicate detection (exact = skipped, same amount within ±3 days = "possible", fingerprints block re-imports) → rule-based category suggestions → review (tick rows, pick categories) → import, undoable. `node scripts/verify-statements.mts` re-checks all PDFs in `statements/` (all 11 match the seed exactly). The owner has no bank CSVs; CSV import can be added when they download some.
+
 ### 4.2 Import sources (ongoing)
 1. **CSV upload**, with one parser per source: Scotiabank chequing, Scotiabank Scene+ Visa, CIBC Costco Mastercard, Triangle Mastercard, Cashew. Detect the source automatically from the headers, and let the owner override it.
 2. **PDF statement upload**, with extraction by Claude into the same normalized row format. Always goes through review.
@@ -290,7 +292,9 @@ Tapping a tile opens its section:
 
 **Summary navigation (decided Nov 8, 2026).** Every category row (spending and income) expands to show that month's transactions. Month arrows go back to **Jan 2026**; one step further is a single page titled **2024–2025** (Money Pro, Dec 2024 – Dec 2025: totals, monthly averages, categories, income sources, adjustments), and nothing before it. Tapping the month title opens a **month picker** sheet (a 12-month grid per year with each month's spending, plus a 2024–2025 tile). The Summary budget card is display-only. **Adjustments** (Cashew's Jan 1, 2026 starting point +$2,310; Money Pro's Dec 31, 2025 −$1,700 for untracked Nov–Dec 2025) have their own category kind and card, and never count as income or spending. GIC payouts count as income (loan money coming back). **Month switching never blanks the screen** (decided Nov 8, 2026): the current month stays visible (dimmed, with a thin lime progress line) until the next has loaded, then swaps in place; money figures count up or roll to their new values (`AnimatedCents`). Neighbouring months load in the background; the URL stays in sync via `history.pushState`, so back/forward/refresh work. Skeletons appear only on a cold load. No page-wide crossfade between screens. "vs last month" comparisons are hidden for the current month (shown for finished months).
 
-### 7.11 Claude chat: the owner's own finance assistant
+> **Decided Nov 8, 2026: no in-app chat and no in-app summary button.** The owner talks to their finances from their own Claude app (claude.ai / desktop / mobile) through the **MCP server** below, keeping every conversation there. The chat screen, memory screen and "Write my summary" button are dropped; the MCP tools (read + draft→confirm writes) carry that role. The mobile tab bar is Home · Activity · (+) · Budgets · **Summary**; Settings is reached from a gear on Home (phones) or the sidebar.
+
+### 7.11 Claude chat _(superseded: see note above; MCP section still applies)_: the owner's own finance assistant
 A chat screen where Claude knows the owner's financial context, learns their habits, and **does the data entry**.
 
 **Plain-language entry.** Example: *"I just spent $120 in groceries, $50 eating out but my friend owes me 50% of it. $100 Costco run which has $20 of household items."* Claude turns this into:

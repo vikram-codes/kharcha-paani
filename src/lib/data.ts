@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { budgetBand, budgetStatus, type BudgetLineDef } from "./budget";
-import { addMonths, monthKey, monthRange, todayISO, type ISODate, type MonthKey } from "./dates";
+import { addDays, addMonths, monthKey, monthRange, todayISO, type ISODate, type MonthKey } from "./dates";
 import { loanState, payoffMonth } from "./loan";
 import { nextPayday, type HolidayRule } from "./paydays";
 import { summarize, type CategoryInfo, type TxRow } from "./summary";
@@ -706,4 +706,156 @@ export async function deleteTransaction(id: string) {
   const { db } = await authed();
   const rows = ok(await db.from("transactions").delete().eq("id", id).select("id"));
   if (!rows.length) throw new Error("Transaction not found.");
+}
+
+// ───────────────────────────── statement import (§4.3) ─────────────────────────────
+
+export type ImportPreviewRow = {
+  date: ISODate;
+  posted: ISODate | null;
+  amount_cents: number;
+  description: string;
+  merchant: string;
+  fingerprint: string;
+  status: "new" | "duplicate" | "possible" | "imported";
+  /** What it matched (for duplicate / possible). */
+  match: { date: ISODate; amount_cents: number; description: string; note: string | null } | null;
+  categoryId: string | null;
+};
+
+/** Reads a statement PDF and returns what would be imported. Saves nothing. */
+export async function previewStatement(bytes: Uint8Array, fileName: string) {
+  const { db } = await authed();
+  const [{ pdfToLayoutText }, { parseStatement }, { matchDuplicates, fingerprints }, { suggestCategory }, { cleanMerchant }] = await Promise.all([
+    import("./import/pdf-text"),
+    import("./import/statements"),
+    import("./import/dedupe"),
+    import("./import/categorize"),
+    import("./merchant"),
+  ]);
+  const text = await pdfToLayoutText(bytes);
+  const parsed = parseStatement(text);
+  const account = okMaybe(await db.from("accounts").select("id,name").eq("key", parsed.source).maybeSingle());
+  if (!account) throw new Error(`No account set up for ${parsed.source}.`);
+  if (!parsed.rows.length) throw new Error("No transactions found in this statement.");
+
+  const dates = parsed.rows.map((r) => r.date).sort();
+  const from = addDays(dates[0], -3);
+  const to = addDays(dates[dates.length - 1], 3);
+  const [existing, cats] = await Promise.all([
+    db.from("transactions").select("id,date,amount_cents,description,note,fingerprint").eq("account_id", account.id).gte("date", from).lte("date", to).limit(2000).then(ok),
+    categories(db),
+  ]);
+  const prints = fingerprints(parsed.rows);
+  const taken = new Set(existing.map((e) => e.fingerprint).filter(Boolean));
+  const matches = matchDuplicates(
+    parsed.rows,
+    existing.map((e) => ({ id: e.id, date: e.date, amount_cents: Number(e.amount_cents), description: e.description })),
+  );
+  const byKey = new Map([...cats.values()].map((c) => [c.key, c.id]));
+  const byId = new Map(existing.map((e) => [e.id, e]));
+
+  const rows: ImportPreviewRow[] = parsed.rows.map((r, i) => {
+    const m = matches[i];
+    const hit = m.existingId ? byId.get(m.existingId) : undefined;
+    const key = suggestCategory(r.description, r.amount_cents);
+    return {
+      ...r,
+      merchant: cleanMerchant(r.description),
+      fingerprint: prints[i],
+      status: taken.has(prints[i]) ? "imported" : m.status,
+      match: hit ? { date: hit.date as ISODate, amount_cents: Number(hit.amount_cents), description: hit.description, note: hit.note } : null,
+      categoryId: key ? (byKey.get(key) ?? null) : null,
+    };
+  });
+
+  return {
+    fileName,
+    source: parsed.source,
+    account: { id: account.id, name: account.name },
+    periodEnd: parsed.periodEnd,
+    checks: parsed.checks,
+    rows,
+  };
+}
+
+export type ImportCommit = {
+  fileName: string;
+  source: string;
+  accountId: string;
+  rows: { date: ISODate; posted: ISODate | null; amount_cents: number; description: string; fingerprint: string; categoryId: string | null }[];
+  skipped: number;
+};
+
+/** Saves the confirmed rows as one import (undoable). Re-checks fingerprints so nothing is saved twice. */
+export async function commitStatementImport(input: ImportCommit) {
+  const { db } = await authed();
+  const account = okMaybe(await db.from("accounts").select("id").eq("id", input.accountId).maybeSingle());
+  if (!account) throw new Error("Account not found.");
+  const rows = input.rows.filter(
+    (r) => /^\d{4}-\d{2}-\d{2}$/.test(r.date) && Number.isInteger(r.amount_cents) && r.amount_cents !== 0 && typeof r.fingerprint === "string",
+  );
+  const already = new Set(
+    ok(await db.from("transactions").select("fingerprint").eq("account_id", account.id).in("fingerprint", rows.map((r) => r.fingerprint).slice(0, 1000))).map(
+      (r) => r.fingerprint,
+    ),
+  );
+  const fresh = rows.filter((r) => !already.has(r.fingerprint));
+  const catIds = [...new Set(fresh.map((r) => r.categoryId).filter((x): x is string => !!x))];
+  const kinds = new Map(
+    catIds.length ? ok(await db.from("categories").select("id,kind").in("id", catIds)).map((c) => [c.id, c.kind]) : [],
+  );
+
+  const [imp] = ok(
+    await db
+      .from("imports")
+      .insert({
+        file_name: input.fileName.slice(0, 200),
+        source: input.source,
+        row_count: input.rows.length + input.skipped,
+        imported_count: fresh.length,
+        skipped_count: input.skipped + (rows.length - fresh.length),
+        status: "committed",
+      })
+      .select("id"),
+  );
+  if (fresh.length) {
+    ok(
+      await db
+        .from("transactions")
+        .insert(
+          fresh.map((r) => ({
+            account_id: account.id,
+            date: r.date,
+            posted_date: r.posted,
+            amount_cents: r.amount_cents,
+            description: r.description.slice(0, 300),
+            category_id: r.categoryId && kinds.has(r.categoryId) ? r.categoryId : null,
+            is_transfer: r.categoryId ? kinds.get(r.categoryId) === "transfer" : false,
+            source: "import",
+            import_id: imp.id,
+            fingerprint: r.fingerprint,
+            needs_review: !r.categoryId,
+          })),
+        )
+        .select("id"),
+    );
+  }
+  return { imported: fresh.length, importId: imp.id };
+}
+
+export async function listImports() {
+  const { db } = await session();
+  return ok(
+    await db.from("imports").select("id,file_name,source,imported_count,skipped_count,status,created_at").neq("source", "seed").order("created_at", { ascending: false }).limit(20),
+  );
+}
+
+/** Removes every transaction an import added. */
+export async function undoImport(id: string) {
+  const { db } = await authed();
+  const imp = okMaybe(await db.from("imports").select("id,status").eq("id", id).maybeSingle());
+  if (!imp || imp.status !== "committed") throw new Error("Nothing to undo.");
+  ok(await db.from("transactions").delete().eq("import_id", id).select("id"));
+  ok(await db.from("imports").update({ status: "undone" }).eq("id", id).select("id"));
 }

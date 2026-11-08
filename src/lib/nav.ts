@@ -1,6 +1,6 @@
 import {
   ArrowLeftRight,
-  Bot,
+  ChartPie,
   CreditCard,
   FileUp,
   Home,
@@ -14,7 +14,7 @@ import {
 
 export type NavItem = { href: string; label: string; icon: LucideIcon };
 
-/** Mobile bottom bar (§9): Home · Transactions · (+) · Budgets · Chat. */
+/** Mobile bottom bar (§9): Home · Activity · (+) · Budgets · Summary. (No in-app chat: Claude connects over MCP.) */
 export const mobileTabs: { left: NavItem[]; right: NavItem[] } = {
   left: [
     { href: "/", label: "Home", icon: Home },
@@ -22,7 +22,7 @@ export const mobileTabs: { left: NavItem[]; right: NavItem[] } = {
   ],
   right: [
     { href: "/budgets", label: "Budgets", icon: PiggyBank },
-    { href: "/chat", label: "Chat", icon: Bot },
+    { href: "/summary", label: "Summary", icon: ChartPie },
   ],
 };
 
@@ -33,6 +33,7 @@ export const sidebarSections: { title?: string; items: NavItem[] }[] = [
       { href: "/", label: "Home", icon: Home },
       { href: "/transactions", label: "Transactions", icon: ArrowLeftRight },
       { href: "/budgets", label: "Budgets", icon: PiggyBank },
+      { href: "/summary", label: "Summary", icon: ChartPie },
     ],
   },
   {
@@ -48,7 +49,6 @@ export const sidebarSections: { title?: string; items: NavItem[] }[] = [
     title: "Tools",
     items: [
       { href: "/imports", label: "Imports", icon: FileUp },
-      { href: "/chat", label: "Chat", icon: Bot },
       { href: "/settings", label: "Settings", icon: Settings },
     ],
   },
