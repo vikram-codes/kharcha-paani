@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Droplet, LogOut, Plus } from "lucide-react";
@@ -10,7 +11,18 @@ import { QuickAddSheet } from "./quick-add-sheet";
 
 /** Desktop navigation (§9) — where the depth lives. */
 export function Sidebar() {
-  const pathname = usePathname();
+  return (
+    <Suspense fallback={<SidebarView pathname={null} />}>
+      <SidebarWithPath />
+    </Suspense>
+  );
+}
+
+function SidebarWithPath() {
+  return <SidebarView pathname={usePathname()} />;
+}
+
+function SidebarView({ pathname }: { pathname: string | null }) {
   return (
     <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar px-3 py-5 md:flex">
       <Link href="/" className="flex items-center gap-2 px-3 pb-6">
@@ -42,7 +54,7 @@ export function Sidebar() {
               </p>
             )}
             {section.items.map((item) => {
-              const active = isActive(pathname, item.href);
+              const active = pathname != null && isActive(pathname, item.href);
               const Icon = item.icon;
               return (
                 <Link

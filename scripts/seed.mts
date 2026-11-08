@@ -179,6 +179,9 @@ const [imp] = must(
   }).select("id"),
 );
 
+// Payments that are spending AND reduce a debt (§3.2).
+const PAYS: Record<string, string> = { student_loan: "student_loan", affirm: "affirm" };
+
 const txs = txRows.map((r, i) => {
   const acc = accountId.get(r.account);
   if (!acc) fail(`Row ${i + 2}: unknown account "${r.account}"`);
@@ -196,11 +199,33 @@ const txs = txRows.map((r, i) => {
     import_id: imp.id,
     in_reports: r.in_reports === "True",
     is_transfer: r.essential === "T",
+    pays_account_id: PAYS[r.category_key] ? accountId.get(PAYS[r.category_key]) : null,
   };
 });
 for (let i = 0; i < txs.length; i += 500) {
   must(await db.from("transactions").insert(txs.slice(i, i + 500)).select("id"));
 }
+
+// Known upcoming payments (owner-confirmed, §3.2 / §7.7)
+const chq = accountId.get("scotia_chequing");
+const bills = [
+  { name: "Student loan", note: "Remitly", account: chq, pays: "student_loan", cat: "student_loan", amount: -55_000, cadence: "monthly", next: "2026-11-10" },
+  { name: "Car insurance", note: "Triangle", account: accountId.get("triangle"), cat: "car_ins", amount: -27_958, cadence: "monthly", next: "2026-11-14" },
+  { name: "Affirm", note: "Final payment", account: chq, pays: "affirm", cat: "affirm", amount: -2_490, cadence: "once", next: "2026-11-16" },
+  { name: "Affirm", note: "Final payment", account: chq, pays: "affirm", cat: "affirm", amount: -10_104, cadence: "once", next: "2026-11-20" },
+  { name: "Rogers", note: "Phone & internet", account: accountId.get("triangle"), cat: "phone", amount: -13_223, cadence: "monthly", next: "2026-11-20" },
+  { name: "Affirm walk pad", note: "6 × $50", account: chq, pays: "affirm_walkpad", cat: "affirm", amount: -5_000, cadence: "monthly", next: "2026-11-30", end: "2027-04-30" },
+  { name: "Rent", note: "Incl. utilities", account: chq, cat: "rent", amount: -70_000, cadence: "monthly", next: "2026-12-01" },
+];
+must(
+  await db.from("recurring_series").insert(
+    bills.map((b) => ({
+      user_id: userId, name: b.name, note: b.note, account_id: b.account,
+      pays_account_id: b.pays ? accountId.get(b.pays) : null, category_id: categoryId.get(b.cat),
+      amount_cents: b.amount, cadence: b.cadence, next_date: b.next, end_date: b.end ?? null,
+    })),
+  ).select("id"),
+);
 
 // ── report ──────────────────────────────────────────────────────────────
 const balances = must(
@@ -224,7 +249,7 @@ async function findUserId(addr: string): Promise<string> {
 async function wipe(uid: string) {
   // Children before parents, so FKs with "restrict" never block.
   for (const t of [
-    "shared_debts", "transaction_splits", "paycheques", "transactions", "imports", "rules",
+    "recurring_series", "shared_debts", "transaction_splits", "paycheques", "transactions", "imports", "rules",
     "merchants", "budgets", "savings_goals", "balance_snapshots", "accounts",
   ]) {
     must(await db.from(t).delete().eq("user_id", uid).select("user_id"));

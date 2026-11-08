@@ -1,39 +1,154 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import { ChevronRight, CreditCard, TrendingUp, Wallet } from "lucide-react";
-import { ScreenPlaceholder } from "@/components/shell/screen-placeholder";
+import { CategoryChip } from "@/components/category-icon";
+import { Skeleton } from "@/components/ui/skeleton";
+import { bandColorVar, budgetBand } from "@/lib/budget";
+import { daysBetween, formatDay, formatMonthName, formatShort } from "@/lib/dates";
+import { getHome } from "@/lib/data";
+import { formatCents } from "@/lib/money";
 
-const tiles = [
-  { href: "/cash", label: "Cash", icon: Wallet, hint: "Chequing, savings & emergency fund" },
-  { href: "/debts", label: "Debts", icon: CreditCard, hint: "Cards, student loan & Affirm" },
-  { href: "/investments", label: "Investments", icon: TrendingUp, hint: "Updated by you" },
-] as const;
-
-/**
- * Shell-only Home. The real layout (tiles + "left to spend" + upcoming bills)
- * is chosen by the owner from mockups in phase 4, and fed by Supabase.
- */
 export default function HomePage() {
   return (
-    <ScreenPlaceholder title="Home" phase={4}>
-      <div className="grid gap-3 md:grid-cols-3">
-        {tiles.map(({ href, label, icon: Icon, hint }) => (
-          <Link
-            key={href}
-            href={href}
-            className="group flex items-center gap-4 rounded-2xl bg-surface-1 p-4 transition-colors duration-(--duration-fast) hover:bg-surface-2 active:scale-[0.99]"
-          >
-            <span className="grid size-10 place-items-center rounded-xl bg-surface-2 text-lime-ink group-hover:bg-surface-3">
-              <Icon className="size-5" />
+    <div className="mx-auto flex max-w-md flex-col gap-5 md:max-w-3xl">
+      <Suspense fallback={<HomeSkeleton />}>
+        <Home />
+      </Suspense>
+    </div>
+  );
+}
+
+async function Home() {
+  const h = await getHome();
+  const pct = h.plannedIncome ? Math.round((h.spent / h.plannedIncome) * 100) : null;
+  const color = h.plannedIncome ? bandColorVar[budgetBand(h.spent, h.plannedIncome)] : "var(--lime)";
+
+  return (
+    <>
+      {/* Hero: total spent this month → Summary */}
+      <Link
+        href={`/summary/${h.month}`}
+        className="group block rounded-3xl bg-surface-1 p-5 ring-1 ring-border transition-transform duration-(--duration-fast) active:scale-[0.99]"
+      >
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
+            Spent in {formatMonthName(h.month)}
+          </p>
+          <ChevronRight className="size-4 text-muted-foreground transition-transform duration-(--duration-fast) group-hover:translate-x-0.5" />
+        </div>
+        <p className="num mt-2 text-[44px] leading-none font-semibold tracking-tight">
+          {formatCents(h.spent, { whole: true })}
+        </p>
+        {h.plannedIncome && (
+          <>
+            <p className="num mt-2 text-sm text-muted-foreground">
+              of {formatCents(h.plannedIncome, { whole: true })} planned income · {pct}%
+            </p>
+            <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-surface-3">
+              <div className="h-full rounded-full" style={{ width: `${Math.min(100, pct ?? 0)}%`, background: color }} />
+            </div>
+          </>
+        )}
+        <div className="mt-4 flex justify-between border-t border-border pt-3 text-xs font-medium text-muted-foreground">
+          <span>
+            {h.daysLeft} {h.daysLeft === 1 ? "day" : "days"} left
+          </span>
+          {h.nextPayday && (
+            <span>
+              Payday <span className="text-foreground">{formatDay(h.nextPayday)}</span>
             </span>
-            <span className="flex min-w-0 flex-1 flex-col">
-              <span className="text-sm text-muted-foreground">{label}</span>
-              <span className="num text-2xl font-semibold">—</span>
-              <span className="truncate text-xs text-muted-foreground">{hint}</span>
-            </span>
-            <ChevronRight className="size-4 text-muted-foreground" />
-          </Link>
-        ))}
+          )}
+        </div>
+      </Link>
+
+      {/* Balances */}
+      <section className="grid gap-2 md:grid-cols-3">
+        <Tile href="/cash" icon={Wallet} label="Cash" value={h.cash} sub="Chequing · Savings · Emergency ••••" />
+        <Tile
+          href="/debts"
+          icon={CreditCard}
+          label="Debts"
+          value={h.debts}
+          sub={`${h.debtCounts.cards} cards${h.debtCounts.plans ? ` · ${h.debtCounts.plans} Affirm plans` : ""}`}
+        />
+        <Tile
+          href="/investments"
+          icon={TrendingUp}
+          label="Investments"
+          value={h.investments}
+          sub={h.investmentCount ? `${h.investmentCount} accounts` : "Add your first account"}
+        />
+      </section>
+
+      {/* Coming up */}
+      {h.upcoming.length > 0 && (
+        <section>
+          <h2 className="mb-1 px-1 text-sm font-medium text-muted-foreground">Coming up</h2>
+          <div className="rounded-2xl border border-dashed border-border px-4 py-1">
+            {h.upcoming.map((u) => {
+              const inDays = daysBetween(h.today, u.date);
+              return (
+                <div key={u.id} className="flex items-center gap-3 py-2.5 opacity-60">
+                  <CategoryChip icon={u.icon} color={u.color} size="sm" dashed />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-medium">{u.name}</span>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {formatShort(u.date)} · {inDays === 0 ? "today" : inDays === 1 ? "tomorrow" : `in ${inDays} days`}
+                      {u.note ? ` · ${u.note}` : ""}
+                    </span>
+                  </span>
+                  <span className="num text-sm">{formatCents(u.amount_cents)}</span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+    </>
+  );
+}
+
+function Tile({
+  href,
+  icon: Icon,
+  label,
+  value,
+  sub,
+}: {
+  href: string;
+  icon: typeof Wallet;
+  label: string;
+  value: number;
+  sub: string;
+}) {
+  return (
+    <Link
+      href={href}
+      className="group flex items-center gap-4 rounded-2xl bg-surface-1 p-4 transition-colors duration-(--duration-fast) hover:bg-surface-2 active:scale-[0.99]"
+    >
+      <span className="grid size-11 place-items-center rounded-xl bg-surface-2 text-lime-ink group-hover:bg-surface-3">
+        <Icon className="size-5" />
+      </span>
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="text-sm text-muted-foreground">{label}</span>
+        <span className="num text-2xl font-semibold tracking-tight">{formatCents(value)}</span>
+        <span className="truncate text-xs text-muted-foreground">{sub}</span>
+      </span>
+      <ChevronRight className="size-4 text-muted-foreground" />
+    </Link>
+  );
+}
+
+function HomeSkeleton() {
+  return (
+    <>
+      <Skeleton className="h-[188px] rounded-3xl" />
+      <div className="grid gap-2 md:grid-cols-3">
+        <Skeleton className="h-[92px] rounded-2xl" />
+        <Skeleton className="h-[92px] rounded-2xl" />
+        <Skeleton className="h-[92px] rounded-2xl" />
       </div>
-    </ScreenPlaceholder>
+      <Skeleton className="h-[170px] rounded-2xl" />
+    </>
   );
 }

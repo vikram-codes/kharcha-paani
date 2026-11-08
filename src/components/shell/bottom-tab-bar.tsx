@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion } from "motion/react";
@@ -37,7 +38,18 @@ function Tab({ item, active }: { item: NavItem; active: boolean }) {
 
 /** Mobile-only bottom bar with a raised center + (Quick-add). */
 export function BottomTabBar() {
-  const pathname = usePathname();
+  return (
+    <Suspense fallback={<BottomTabBarView pathname={null} />}>
+      <BottomTabBarWithPath />
+    </Suspense>
+  );
+}
+
+function BottomTabBarWithPath() {
+  return <BottomTabBarView pathname={usePathname()} />;
+}
+
+function BottomTabBarView({ pathname }: { pathname: string | null }) {
   return (
     <nav
       aria-label="Primary"
@@ -45,7 +57,7 @@ export function BottomTabBar() {
     >
       <div className="mx-auto flex h-16 max-w-md items-stretch px-2">
         {mobileTabs.left.map((t) => (
-          <Tab key={t.href} item={t} active={isActive(pathname, t.href)} />
+          <Tab key={t.href} item={t} active={pathname != null && isActive(pathname, t.href)} />
         ))}
         <div className="flex flex-1 items-start justify-center">
           <QuickAddSheet
@@ -63,7 +75,7 @@ export function BottomTabBar() {
           />
         </div>
         {mobileTabs.right.map((t) => (
-          <Tab key={t.href} item={t} active={isActive(pathname, t.href)} />
+          <Tab key={t.href} item={t} active={pathname != null && isActive(pathname, t.href)} />
         ))}
       </div>
     </nav>

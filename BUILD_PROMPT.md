@@ -69,6 +69,14 @@ The app has three top-level groups. Accounts are grouped by **what the money is*
 | Affirm (Sep plans) | Two 3-month plans paid from chequing. **One final payment of each:** $24.90 (~Nov 16) and $101.04 (~Nov 20, 2026), then close at $0. |
 | Affirm (walk pad) | **$50/month × 6** for a walk pad (treadmill), Nov 30, 2026 → Apr 30, 2027. Starts at $300 and closes automatically at $0. |
 
+**Debts total excludes the student loan (decided Nov 8, 2026).** The Debts tile and total = credit cards + Affirm only. The Debts section has a separate **Student loan** entry that opens its own page:
+- A big rounded ring (app theme) showing the **loan left in CAD** as the big number, with **amount paid so far** above it. The ring = left ÷ (left + paid), so it shrinks as payments are made.
+- **Interest: 9.5% a year, compounded monthly.** On the 1st of each month the balance grows by balance × 9.5% ÷ 12 (≈ $384 on $48.5k). Show this month's interest, how much of the $550 goes to principal, and the projected payoff date.
+- **Later:** show the total interest accumulated since the loan was approved (needs the loan's start date and original amount from the owner).
+- A loan or Affirm payment from chequing is spending (essential fixed) **and** is linked to its debt account (`transactions.pays_account_id`) so that debt goes down.
+
+**Which account pays what (confirmed from Aug–Oct data):** everything goes on a credit card (raises Debts, doesn't touch Cash) **except rent, Affirm and the student loan (Remitly)**, which come out of chequing. Quick-add defaults follow this. Tax refunds and government benefits are deposited to chequing, so they're part of Cash.
+
 ### 3.3 Investments
 - Accounts the owner names (e.g. TFSA, RRSP, brokerage). The **value is updated manually** whenever the owner wants.
 - Each update is stored as a dated snapshot, so the value can be charted over time.
@@ -209,12 +217,10 @@ discretionary_left  = discretionary_pool − discretionary_spent
 | ≥ 100% | Red |
 
 ### 7.4 Home screen
-**Mobile (keep it simple):**
-- Three large tiles: **Cash**, **Debts**, **Investments**, each showing its total. Cash = bank accounts + emergency fund; the emergency fund amount stays hidden until revealed.
-- A compact **"left to spend this month"** element (discretionary left, colored per §7.3).
-- The next 1–3 upcoming bills (greyed).
-- Bottom navigation (§9).
-- **ASK** via mockups how to arrange these elements.
+**Mobile (decided Nov 8, 2026 from mockups: C's card shape + B's tiles; no bright-filled surfaces):**
+1. **Hero card** (dark surface, not lime-filled): the big number is **total spent this month** (all expense categories, essentials included; transfers and friend paybacks excluded). Under it: "of $X planned income", a thin progress bar colored per §7.3, and a footer with days left in the month on the left and the **next payday on the right**. No "$/day" figure. **Tapping it opens this month's Summary** (§7.10): a full income-vs-expenses page with month navigation.
+2. **Three big tiles** (B style): Cash, Debts, Investments, each with its total and a one-line breakdown. Cash = bank accounts; the emergency fund stays masked (`••••`).
+3. **Coming up:** the next 3 upcoming payments (greyed, §6).
 
 **Desktop:** the same overview, plus room for charts, recent transactions and budget status side by side.
 
