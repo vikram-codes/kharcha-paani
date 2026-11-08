@@ -44,6 +44,14 @@ describe("summarize", () => {
     expect(s.income).toBe(0);
   });
 
+  it("keeps balance adjustments out of income and spending", () => {
+    const adj = cat("adjustment", "adjustment");
+    const s = summarize([row(231_000, adj), row(-170_000, adj), row(-5_000, eating)]);
+    expect(s.income).toBe(0);
+    expect(s.spent).toBe(5_000);
+    expect(s.adjustments).toBe(61_000);
+  });
+
   it("refunds reduce their category", () => {
     const s = summarize([row(-10_000, eating), row(3_000, eating)]);
     expect(s.spent).toBe(7_000);

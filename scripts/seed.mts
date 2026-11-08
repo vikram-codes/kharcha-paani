@@ -23,7 +23,7 @@ if (!email) fail("Pass --email=<your login email> (or set SEED_USER_EMAIL)");
 const db = createClient(url, secret, { auth: { persistSession: false, autoRefreshToken: false } });
 
 // ── seed files ──────────────────────────────────────────────────────────
-type SeedCategory = { parent: string; sub: string; essential: "" | "F" | "V" | "I" | "T" | "R" };
+type SeedCategory = { parent: string; sub: string; essential: "" | "F" | "V" | "I" | "T" | "R" | "A" };
 type SeedAccount = {
   key: string; name: string; group: string; institution?: string; last4?: string;
   limit?: number; apr?: number; hidden?: boolean; balance?: number | null; as_of?: string;
@@ -60,6 +60,7 @@ const PARENT_STYLE: Record<string, [color: string, icon: string]> = {
   Transfer: ["#A0AEC0", "arrow-left-right"],
   Reimbursement: ["#38B2AC", "hand-coins"],
   Family: ["#F6AD55", "hand-coins"],
+  Adjustments: ["#718096", "scale"],
 };
 const SUB_ICON: Record<string, string> = {
   rent: "house", phone: "smartphone", car_ins: "shield-check", student_loan: "graduation-cap",
@@ -70,11 +71,11 @@ const SUB_ICON: Record<string, string> = {
   gifts_given: "gift", travel: "plane", misc: "circle-dot", salary: "banknote", side: "car-front",
   benefits: "landmark", gift_in: "gift", income_other: "plus-circle", cc_payment: "credit-card",
   savings_xfer: "piggy-bank", friend_payback: "hand-coins", unknown: "circle-help",
-  family_india: "hand-coins", toiletries: "spray-can", gic: "landmark",
+  family_india: "hand-coins", toiletries: "spray-can", gic: "landmark", adjustment: "scale",
 };
 
 function kindOf(e: SeedCategory["essential"]) {
-  return e === "I" ? "income" : e === "T" ? "transfer" : e === "R" ? "reimbursement" : "expense";
+  return e === "I" ? "income" : e === "T" ? "transfer" : e === "R" ? "reimbursement" : e === "A" ? "adjustment" : "expense";
 }
 function essentialOf(e: SeedCategory["essential"]) {
   return e === "F" ? "fixed" : e === "V" ? "variable" : null;
@@ -263,8 +264,8 @@ const LINES: { key: string; name: string; kind: "fixed" | "variable"; cents: num
   { key: "phone", name: "Phone & internet", kind: "fixed", cents: 10_500, icon: "smartphone", color: "#4FD1C5", cats: ["phone"] },
   { key: "subs", name: "Subscriptions", kind: "fixed", cents: 6_718, icon: "repeat", color: "#B794F4", cats: ["subs"] },
   { key: "affirm", name: "Affirm", kind: "fixed", cents: 5_000, icon: "calendar-clock", color: "#A0AEC0", cats: ["affirm"] },
-  // Estimate until the Nov 19–20 statements: Triangle $5,670 × 21.99%/12 + CIBC $2,730 × 20.99%/12.
-  { key: "interest", name: "Card interest", kind: "fixed", cents: 15_165, icon: "percent", color: "#FC8181", cats: ["cc_interest"] },
+  // Estimate until the Nov 19–20 statements: Triangle $5,670 × 21.99%/12 + CIBC $2,730 × 21.75%/12.
+  { key: "interest", name: "Card interest", kind: "fixed", cents: 15_338, icon: "percent", color: "#FC8181", cats: ["cc_interest"] },
   { key: "groceries", name: "Groceries", kind: "variable", cents: 30_000, icon: "shopping-basket", color: "#B6FF3B", cats: ["groceries"] },
   { key: "eating", name: "Eating out & other", kind: "variable", cents: 30_000, icon: "utensils", color: "#F6E05E", cats: ["eating_out", "misc", "unknown", "career", "gifts_given"] },
   { key: "gas", name: "Gas & car", kind: "variable", cents: 10_000, icon: "fuel", color: "#F6AD55", cats: ["fuel", "tolls", "car_maint"] },
@@ -292,6 +293,9 @@ must(
     { user_id: userId, line_id: lineId.get("phone"), month: "2026-11-01", amount_cents: 13_223, note: "Old plan; $105 from December" },
   ]).select("id"),
 );
+
+// Profile: greeting + headline monthly budget (owner: keep it at a round $3,000).
+must(await db.from("profiles").upsert({ user_id: userId, display_name: "Vikram", monthly_budget_cents: 300_000 }).select("user_id"));
 
 // Money friends owe (owner, Nov 8 2026): food, split across eating out/groceries unknown.
 must(
@@ -330,6 +334,7 @@ async function wipe(uid: string) {
   must(await db.from("categories").delete().eq("user_id", uid).not("parent_id", "is", null).select("id"));
   must(await db.from("categories").delete().eq("user_id", uid).select("id"));
   must(await db.from("income_settings").delete().eq("user_id", uid).select("user_id"));
+  must(await db.from("profiles").delete().eq("user_id", uid).select("user_id"));
   console.log("  wiped existing data");
 }
 

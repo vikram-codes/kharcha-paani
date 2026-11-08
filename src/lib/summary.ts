@@ -5,7 +5,7 @@ export type CategoryInfo = {
   key: string;
   name: string;
   parentName: string | null;
-  kind: "expense" | "income" | "transfer" | "reimbursement";
+  kind: "expense" | "income" | "transfer" | "reimbursement" | "adjustment";
   essential: "fixed" | "variable" | null;
   color: string | null;
   icon: string | null;
@@ -31,6 +31,8 @@ export type MonthSummary = {
   expenses: CategoryTotal[];
   /** Income by category, largest first. */
   incomes: CategoryTotal[];
+  /** Balance adjustments (signed; neither income nor spending). */
+  adjustments: Cents;
 };
 
 /**
@@ -45,11 +47,16 @@ export function summarize(rows: readonly TxRow[]): MonthSummary {
   let spent = 0;
   let fixed = 0;
   let variable = 0;
+  let adjustments = 0;
 
   for (const r of rows) {
     if (!r.in_reports || r.is_transfer) continue;
     const kind = r.category?.kind ?? (r.amount_cents > 0 ? "income" : "expense");
     if (kind === "transfer" || kind === "reimbursement") continue;
+    if (kind === "adjustment") {
+      adjustments += r.amount_cents;
+      continue;
+    }
     const key = r.category?.id ?? "__none";
 
     if (kind === "income") {
@@ -74,6 +81,7 @@ export function summarize(rows: readonly TxRow[]): MonthSummary {
     discretionary: spent - fixed - variable,
     expenses: sort(exp),
     incomes: sort(inc),
+    adjustments,
   };
 }
 

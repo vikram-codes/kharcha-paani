@@ -3,7 +3,7 @@ import {
   ArrowLeftRight, Banknote, Briefcase, CalendarClock, Car, CarFront, Circle, CircleDot, CircleHelp,
   CreditCard, Dumbbell, Fuel, Gamepad2, Gift, GraduationCap, HandCoins, HeartPulse, House, Landmark,
   Package, Percent, PiggyBank, Pill, Plane, PlusCircle, Repeat, Scissors, ShieldCheck, Shirt,
-  ShoppingBag, ShoppingBasket, Smartphone, Sofa, SprayCan, SquareParking, Utensils, Wrench,
+  Scale, ShoppingBag, ShoppingBasket, Smartphone, Sofa, SprayCan, SquareParking, Utensils, Wrench,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -15,7 +15,7 @@ const ICONS: Record<string, LucideIcon> = {
   "credit-card": CreditCard, dumbbell: Dumbbell, fuel: Fuel, "gamepad-2": Gamepad2, gift: Gift,
   "graduation-cap": GraduationCap, "hand-coins": HandCoins, "heart-pulse": HeartPulse, house: House,
   landmark: Landmark, package: Package, percent: Percent, "piggy-bank": PiggyBank, pill: Pill, plane: Plane,
-  "plus-circle": PlusCircle, repeat: Repeat, scissors: Scissors, "shield-check": ShieldCheck, shirt: Shirt,
+  "plus-circle": PlusCircle, repeat: Repeat, scale: Scale, scissors: Scissors, "shield-check": ShieldCheck, shirt: Shirt,
   "shopping-bag": ShoppingBag, "shopping-basket": ShoppingBasket, smartphone: Smartphone, sofa: Sofa,
   "spray-can": SprayCan, "square-parking": SquareParking, utensils: Utensils, wrench: Wrench,
 };

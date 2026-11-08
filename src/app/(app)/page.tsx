@@ -25,6 +25,14 @@ async function Home() {
 
   return (
     <div className="flex flex-col gap-5">
+      <header className="px-1">
+        <p className="text-sm text-muted-foreground">{formatDay(h.today)}</p>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          {h.greeting}
+          {h.name ? `, ${h.name}` : ""}
+        </h1>
+      </header>
+
       {/* Hero: total spent this month → Summary */}
       <Link
         href={`/summary/${h.month}`}
@@ -65,7 +73,7 @@ async function Home() {
       {/* Balances */}
       <section className="grid gap-2 md:grid-cols-3">
         <Tile href="/cash" icon={Wallet} label="Cash" value={h.cash} sub="Chequing · Savings · Emergency ••••"
-          extra={h.owedToMe ? `+${formatCents(h.owedToMe, { whole: true })} owed to you` : undefined}
+          extra={h.owedToMe ? `${formatCents(h.owedToMe, { whole: true })} owed to you · not in Cash` : undefined}
         />
         <Tile
           href="/debts"
@@ -129,18 +137,19 @@ function Tile({
   return (
     <Link
       href={href}
-      className="group flex min-w-0 items-center gap-4 rounded-2xl bg-surface-1 p-4 transition-colors duration-(--duration-fast) hover:bg-surface-2 active:scale-[0.99]"
+      className="group relative flex min-w-0 items-center gap-4 rounded-2xl bg-surface-1 p-4 transition-colors duration-(--duration-fast) hover:bg-surface-2 active:scale-[0.99] md:flex-col md:items-stretch md:gap-4 md:p-5"
     >
-      <span className="grid size-11 place-items-center rounded-xl bg-surface-2 text-lime-ink group-hover:bg-surface-3">
+      {/* Mobile: icon · text · chevron in a row. Desktop (3 columns): icon on top, chevron in the corner. */}
+      <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-surface-2 text-lime-ink group-hover:bg-surface-3">
         <Icon className="size-5" />
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="text-sm text-muted-foreground">{label}</span>
-        <span className="num text-2xl font-semibold tracking-tight">{formatCents(value)}</span>
+        <span className="num truncate text-2xl font-semibold tracking-tight">{formatCents(value)}</span>
         <span className="truncate text-xs text-muted-foreground">{sub}</span>
-        {extra && <span className="num mt-0.5 truncate text-xs text-money-in">{extra}</span>}
+        {extra && <span className="num mt-0.5 truncate text-xs text-muted-foreground/60">{extra}</span>}
       </span>
-      <ChevronRight className="size-4 text-muted-foreground" />
+      <ChevronRight className="size-4 shrink-0 text-muted-foreground md:absolute md:top-5 md:right-5" />
     </Link>
   );
 }

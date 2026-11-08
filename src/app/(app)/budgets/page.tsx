@@ -4,7 +4,7 @@ import { ChevronRight } from "lucide-react";
 import { CategoryBreakdown, type BreakdownRow } from "@/components/category-breakdown";
 import { Reveal } from "@/components/reveal";
 import { Skeleton } from "@/components/ui/skeleton";
-import { bandColorVar, type BudgetLineStatus } from "@/lib/budget";
+import { bandColorVar, budgetBand, type BudgetLineStatus } from "@/lib/budget";
 import { formatMonthName } from "@/lib/dates";
 import { getBudgets, type CategoryTx } from "@/lib/data";
 import { formatCents } from "@/lib/money";
@@ -27,7 +27,9 @@ const money = (c: number) => formatCents(c, { whole: true });
 async function Budgets() {
   const d = await getBudgets();
   const s = d.status;
-  const left = s.budget - s.spent;
+  const total = d.total ?? s.budget;
+  const left = total - s.spent;
+  const unallocated = total - s.budget;
   const fixed = s.lines.filter((l) => l.kind === "fixed");
   const variable = s.lines.filter((l) => l.kind === "variable");
   const unplanned = Object.entries(d.transactions).filter(([id]) => !s.lines.some((l) => l.categoryIds.includes(id)));
@@ -38,10 +40,10 @@ async function Budgets() {
         <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">{formatMonthName(d.month)} budget</p>
         <p className="num mt-2 text-[40px] leading-none font-semibold tracking-tight">
           {money(s.spent)}
-          <span className="text-lg font-medium text-muted-foreground"> / {money(s.budget)}</span>
+          <span className="text-lg font-medium text-muted-foreground"> / {money(total)}</span>
         </p>
         <div className="mt-4 h-2 overflow-hidden rounded-full bg-surface-3">
-          <div className="h-full rounded-full" style={{ width: `${Math.min(100, (s.spent / Math.max(1, s.budget)) * 100)}%`, background: bandColorVar[s.band] }} />
+          <div className="h-full rounded-full" style={{ width: `${Math.min(100, (s.spent / Math.max(1, total)) * 100)}%`, background: bandColorVar[budgetBand(s.spent, total)] }} />
         </div>
         <div className="mt-3 flex justify-between text-xs text-muted-foreground">
           <span className={cn("num", left < 0 && "text-budget-over")}>
@@ -49,6 +51,12 @@ async function Budgets() {
           </span>
           {d.daysLeft > 0 && <span>{d.daysLeft} days left</span>}
         </div>
+        {d.total != null && unallocated !== 0 && (
+          <p className="num mt-2 text-xs text-muted-foreground">
+            Lines below plan {money(s.budget)} ·{" "}
+            {unallocated > 0 ? `${money(unallocated)} buffer` : <span className="text-budget-high">{money(-unallocated)} over the {money(total)}</span>}
+          </p>
+        )}
       </section>
 
       <Group title="Fixed" spent={s.fixed.spent} budget={s.fixed.budget} lines={fixed} transactions={d.transactions} />

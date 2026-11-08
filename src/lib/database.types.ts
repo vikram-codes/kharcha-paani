@@ -435,6 +435,27 @@ export type Database = {
           },
         ]
       }
+      profiles: {
+        Row: {
+          display_name: string | null
+          monthly_budget_cents: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          display_name?: string | null
+          monthly_budget_cents?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Update: {
+          display_name?: string | null
+          monthly_budget_cents?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       recurring_series: {
         Row: {
           account_id: string | null

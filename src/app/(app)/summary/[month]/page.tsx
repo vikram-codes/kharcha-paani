@@ -2,14 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowDownRight, ArrowUpRight, ChevronLeft, ChevronRight, History } from "lucide-react";
+import { MonthPicker } from "@/components/month-picker";
 import { CategoryBreakdown, type BreakdownRow } from "@/components/category-breakdown";
-import { CategoryChip } from "@/components/category-icon";
 import { Reveal } from "@/components/reveal";
 import { SegmentRing } from "@/components/ring";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bandColorVar } from "@/lib/budget";
-import { formatMonth, formatShort, isMonthKey, shiftMonth, toDate } from "@/lib/dates";
-import { FIRST_MONTH, HISTORY, getHistorySummary, getMonthSummary, type CategoryTx } from "@/lib/data";
+import { formatMonth, formatShort, isMonthKey, shiftMonth } from "@/lib/dates";
+import { FIRST_MONTH, HISTORY, getHistorySummary, getMonthIndex, getMonthSummary, type CategoryTx } from "@/lib/data";
 import { formatCents } from "@/lib/money";
 import type { CategoryTotal, MonthSummary } from "@/lib/summary";
 import { cn } from "@/lib/utils";
@@ -40,17 +40,21 @@ async function Summary({ params }: { params: Params }) {
 
 // ───────────────────────────── one month ─────────────────────────────
 
+type MonthIndex = Awaited<ReturnType<typeof getMonthIndex>>;
+
 async function MonthView({ month }: { month: string }) {
-  const d = await getMonthSummary(month);
+  const [d, index] = await Promise.all([getMonthSummary(month), getMonthIndex()]);
   const s = d.summary;
   const b = d.budget;
-  const empty = s.spent === 0 && s.income === 0;
+  const empty = s.spent === 0 && s.income === 0 && s.adjustments === 0;
   const prevHref = month === FIRST_MONTH ? `/summary/${HISTORY.key}` : `/summary/${shiftMonth(month, -1)}`;
   const nextDisabled = d.isCurrent || d.isFuture;
 
   return (
     <div className="flex flex-col gap-5">
       <MonthNav
+        index={index}
+        selected={month}
         title={formatMonth(month)}
         subtitle={d.isCurrent ? "So far this month" : undefined}
         prevHref={prevHref}
@@ -82,17 +86,17 @@ async function MonthView({ month }: { month: string }) {
           </section>
 
           {/* Budget */}
-          {b.budget > 0 && (
-            <Link href="/budgets" className="group block rounded-2xl bg-surface-1 p-4 transition-colors duration-(--duration-fast) hover:bg-surface-2">
+          {b.total > 0 && (
+            <section className="rounded-2xl bg-surface-1 p-4">
               <div className="flex items-baseline justify-between">
                 <h2 className="text-sm font-medium text-muted-foreground">Budget</h2>
                 <span className="num text-sm">
                   <span className="font-semibold">{money(b.spent)}</span>
-                  <span className="text-muted-foreground"> of {money(b.budget)}</span>
+                  <span className="text-muted-foreground"> of {money(b.total)}</span>
                 </span>
               </div>
               <div className="mt-3 h-2 overflow-hidden rounded-full bg-surface-3">
-                <div className="h-full rounded-full" style={{ width: `${Math.min(100, (b.spent / b.budget) * 100)}%`, background: bandColorVar[b.band] }} />
+                <div className="h-full rounded-full" style={{ width: `${Math.min(100, (b.spent / b.total) * 100)}%`, background: bandColorVar[b.band] }} />
               </div>
               <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
                 <Mini label="Fixed" spent={b.fixed.spent} budget={b.fixed.budget} />
@@ -102,11 +106,12 @@ async function MonthView({ month }: { month: string }) {
                   <span className={cn("num mt-0.5 block text-sm font-medium", b.unbudgeted > 0 && "text-budget-high")}>{money(b.unbudgeted)}</span>
                 </div>
               </div>
-            </Link>
+            </section>
           )}
 
           <CategoriesCard summary={s} transactions={d.transactions} prevByCat={d.previous ? d.prevByCat : undefined} />
           <IncomeCard summary={s} transactions={d.transactions} />
+          <AdjustmentsCard total={s.adjustments} rows={d.adjustments} />
         </>
       )}
     </div>
@@ -116,15 +121,16 @@ async function MonthView({ month }: { month: string }) {
 // ───────────────────────────── Dec 2024 – Dec 2025 ─────────────────────────────
 
 async function HistoryView() {
-  const h = await getHistorySummary();
+  const [h, index] = await Promise.all([getHistorySummary(), getMonthIndex()]);
   const s = h.summary;
-  const max = Math.max(1, ...h.months.flatMap((m) => [m.income, m.spent]));
 
   return (
     <div className="flex flex-col gap-5">
       <MonthNav
+        index={index}
+        selected={HISTORY.key}
         title={HISTORY.label}
-        subtitle="Money Pro history"
+        subtitle="Dec 2024 – Dec 2025 · Money Pro"
         prevHref={null}
         nextHref={`/summary/${FIRST_MONTH}`}
         nextLabel={formatMonth(FIRST_MONTH)}
@@ -152,55 +158,12 @@ async function HistoryView() {
             <span className="num mt-0.5 block text-sm font-semibold">{money(h.avgIncome)}</span>
           </div>
         </div>
-      </section>
-
-      {/* Month by month */}
-      <section className="rounded-2xl bg-surface-1 p-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-sm font-medium text-muted-foreground">Month by month</h2>
-          <span className="flex items-center gap-3 text-[11px] text-muted-foreground">
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-money-in" />In</span>
-            <span className="flex items-center gap-1"><span className="size-2 rounded-full bg-foreground" />Spent</span>
-          </span>
-        </div>
-        <div className="flex h-36 items-end gap-1.5">
-          {h.months.map((m) => (
-            <div key={m.month} className="flex h-full flex-1 flex-col items-center justify-end gap-1" title={`${formatMonth(m.month)}: in ${money(m.income)}, spent ${money(m.spent)}`}>
-              <div className="flex h-full w-full items-end justify-center gap-[2px]">
-                <div className="w-1/2 max-w-2 rounded-full bg-money-in" style={{ height: `${(m.income / max) * 100}%`, minHeight: m.income ? 3 : 0 }} />
-                <div className="w-1/2 max-w-2 rounded-full bg-foreground" style={{ height: `${(m.spent / max) * 100}%`, minHeight: m.spent ? 3 : 0 }} />
-              </div>
-              <span className="text-[10px] text-muted-foreground">
-                {new Intl.DateTimeFormat("en-CA", { month: "narrow", timeZone: "UTC" }).format(toDate(`${m.month}-01`))}
-              </span>
-            </div>
-          ))}
-        </div>
-        <p className="mt-3 text-xs text-muted-foreground">
-          {h.monthsRecorded} months with entries · Nov 9 – Dec 30, 2025 wasn&apos;t tracked.
-        </p>
+        <p className="mt-3 text-xs text-muted-foreground">Averages over the {h.monthsRecorded} months with entries.</p>
       </section>
 
       <CategoriesCard summary={s} transactions={h.transactions} />
       <IncomeCard summary={s} transactions={h.transactions} />
-
-      {h.biggest.length > 0 && (
-        <section className="rounded-2xl bg-surface-1 p-4">
-          <h2 className="mb-1 text-sm font-medium text-muted-foreground">Biggest expenses</h2>
-          <ul className="divide-y divide-border">
-            {h.biggest.map((t) => (
-              <li key={t.id} className="flex items-center gap-3 py-3">
-                <CategoryChip icon={t.category?.icon} color={t.category?.color} size="sm" />
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium">{t.category?.name ?? t.description}</span>
-                  <span className="text-xs text-muted-foreground">{formatShort(t.date)}, {t.date.slice(0, 4)}</span>
-                </span>
-                <span className="num text-sm font-medium">{formatCents(t.amount_cents)}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      <AdjustmentsCard total={s.adjustments} rows={h.adjustments} />
     </div>
   );
 }
@@ -208,6 +171,8 @@ async function HistoryView() {
 // ───────────────────────────── shared pieces ─────────────────────────────
 
 function MonthNav({
+  index,
+  selected,
   title,
   subtitle,
   prevHref,
@@ -215,6 +180,8 @@ function MonthNav({
   nextHref,
   nextLabel,
 }: {
+  index: MonthIndex;
+  selected: string;
   title: string;
   subtitle?: string;
   prevHref: string | null;
@@ -235,10 +202,16 @@ function MonthNav({
           <ChevronLeft className="size-5" />
         </span>
       )}
-      <div className="min-w-0 text-center">
-        <h1 className="truncate text-lg font-semibold tracking-tight">{title}</h1>
-        {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
-      </div>
+      <h1 className="min-w-0">
+        <MonthPicker
+          title={title}
+          subtitle={subtitle}
+          selected={selected}
+          current={index.current}
+          months={index.months}
+          history={{ key: HISTORY.key, label: HISTORY.label }}
+        />
+      </h1>
       {nextHref ? (
         <Link href={nextHref} prefetch className={btn} aria-label={nextLabel ? `Go to ${nextLabel}` : "Next month"}>
           <ChevronRight className="size-5" />
@@ -331,6 +304,28 @@ function toRow(e: CategoryTotal, spent: number, transactions: Record<string, Cat
       ) : undefined,
     txs: transactions[id] ?? [],
   };
+}
+
+function AdjustmentsCard({ total, rows }: { total: number; rows: CategoryTx[] }) {
+  if (!rows.length) return null;
+  return (
+    <section className="rounded-2xl border border-dashed border-border p-4">
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-sm font-medium text-muted-foreground">Adjustments</h2>
+        <span className="num text-sm font-medium">{formatCents(total, { signed: true })}</span>
+      </div>
+      <p className="mt-0.5 text-xs text-muted-foreground">Balance corrections. Not counted as income or spending.</p>
+      <ul className="mt-2 divide-y divide-border">
+        {rows.map((r) => (
+          <li key={r.id} className="flex items-center gap-3 py-2.5">
+            <span className="num w-12 shrink-0 text-[11px] text-muted-foreground">{formatShort(r.date)}</span>
+            <span className="min-w-0 flex-1 truncate text-sm">{r.description}</span>
+            <span className="num text-sm">{formatCents(r.amount_cents, { signed: true })}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function Stat({ label, value, prev, tone }: { label: string; value: number; prev?: number; tone: "in" | "out" }) {

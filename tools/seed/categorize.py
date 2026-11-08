@@ -52,6 +52,8 @@ CATS = {
  # needs owner input
  "friend_payback": ("Reimbursement", "Paid back by friends", "R"),
  "unknown": ("Misc", "Unknown (owner doesn't recognise)", ""),
+ # balance adjustments: shown in summaries, neither income nor spending
+ "adjustment": ("Adjustments", "Balance adjustment", "A"),
 }
 
 RULES = [  # (regex on description, category key)
@@ -155,7 +157,12 @@ skipped = defaultdict(int)
 for c in cashew:
     if not c["amount"]: skipped["scheduled/unpaid future"] += 1; continue
     if c["date"][:10] >= CUTOFF: skipped["Aug+ (replaced by statements)"] += 1; continue
-    if c["category name"] == "Income" and c["title"] == "Starting Point": skipped["'Starting Point' opening balance (not income)"] += 1; continue
+    if c["category name"] == "Income" and c["title"] == "Starting Point":
+        out.append({"account": "cashew_legacy", "date": c["date"][:10], "amount": float(c["amount"]),
+                    "description": "Cashew starting point", "source": "cashew", "category_key": "adjustment",
+                    "parent": "Adjustments", "sub": "Balance adjustment", "essential": "A", "confidence": "trusted",
+                    "note": "Opening balance when switching to Cashew", "in_reports": True, "origin": "cashew"})
+        continue
     key = cashew_key(c)
     parent, sub, ess = CATS[key]
     row = {"account": "cashew_legacy", "date": c["date"][:10], "amount": float(c["amount"]),
@@ -190,8 +197,14 @@ if MONEYPRO:
     for m in csv.DictReader(open(MONEYPRO, encoding="utf-8-sig")):
         kind, date = m["Transaction Type"], m["Date"][:10]
         if kind == "Opening Balance": skipped["Money Pro opening balance"] += 1; continue
-        if date == "2025-12-31" and m["Category"] == "Misc": skipped["Money Pro year-end adjustment"] += 1; continue
         amt = float(m["Amount"].replace("$", "").replace(",", ""))
+        if date == "2025-12-31" and m["Category"] == "Misc":
+            # Owner: tracking stopped in early Nov 2025; this reconciles untracked income − expenses.
+            out.append({"account": "moneypro_legacy", "date": date, "amount": -amt, "description": "Year-end adjustment",
+                        "source": "moneypro", "category_key": "adjustment", "parent": "Adjustments",
+                        "sub": "Balance adjustment", "essential": "A", "confidence": "trusted",
+                        "note": "Untracked Nov–Dec 2025 (income − expenses)", "in_reports": True, "origin": "moneypro"})
+            continue
         key = moneypro_key(m)
         parent, sub, ess = CATS[key]
         row = {"account": "moneypro_legacy", "date": date, "amount": amt if kind == "Income" else -amt,

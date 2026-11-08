@@ -3,7 +3,7 @@ import { cacheLife } from "next/cache";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { budgetStatus, type BudgetLineDef } from "./budget";
+import { budgetBand, budgetStatus, type BudgetLineDef } from "./budget";
 import { addMonths, monthKey, monthRange, todayISO, type ISODate, type MonthKey } from "./dates";
 import { loanState, payoffMonth } from "./loan";
 import { nextPayday, type HolidayRule } from "./paydays";
@@ -44,7 +44,7 @@ function okMaybe<R extends Res>(res: R): R["data"] {
 
 /** First month with full data in the app; earlier history is one combined Money Pro period. */
 export const FIRST_MONTH: MonthKey = "2026-01";
-export const HISTORY = { key: "2025", start: "2024-12-01", end: "2025-12-31", label: "Dec 2024 – Dec 2025" } as const;
+export const HISTORY = { key: "2025", start: "2024-12-01", end: "2025-12-31", label: "2024–2025" } as const;
 
 // ───────────────────────────── building blocks ─────────────────────────────
 
@@ -147,6 +147,19 @@ async function incomeSettings(db: Db) {
   };
 }
 
+/** Greeting name + the headline monthly budget (a round number the owner sets). */
+async function profile(db: Db) {
+  const p = okMaybe(await db.from("profiles").select("display_name,monthly_budget_cents").maybeSingle());
+  return { name: p?.display_name ?? null, monthlyBudget: p?.monthly_budget_cents != null ? Number(p.monthly_budget_cents) : null };
+}
+
+/** Lines that are balance adjustments, for the Adjustments card. */
+function adjustmentRows(rows: readonly LedgerRow[]): CategoryTx[] {
+  return rows
+    .filter((r) => r.in_reports && r.category?.kind === "adjustment")
+    .map((r) => ({ id: r.id, date: r.date, reportOn: r.reportOn, description: r.description, account: r.account, amount_cents: r.amount_cents, split: r.split }));
+}
+
 /** Budget lines with this month's amounts (override, else default). */
 async function budgetLines(db: Db, month: MonthKey): Promise<BudgetLineDef[]> {
   const [lines, links, overrides] = await Promise.all([
@@ -212,27 +225,32 @@ export async function getHome() {
   const { db, today } = await session();
   const month = monthKey(today);
   const cats = await categories(db);
-  const [bal, rows, income, bills, lines, owed] = await Promise.all([
+  const [bal, rows, income, bills, lines, owed, prof] = await Promise.all([
     balances(db),
     monthLedger(db, month, cats),
     incomeSettings(db),
     upcoming(db, today, cats),
     budgetLines(db, month),
     db.from("shared_debts").select("amount_cents").is("settled_at", null).then(ok),
+    profile(db),
   ]);
   const { end } = monthRange(month);
   const bank = bal.filter((b) => b.account_group === "cash_bank");
   const debts = bal.filter(isDebt);
   const investments = bal.filter((b) => b.account_group === "investment");
   const status = budgetStatus(lines, spentByCategory(rows));
+  const budget = prof.monthlyBudget ?? status.budget;
 
+  const hour = Number(new Intl.DateTimeFormat("en-CA", { timeZone: "America/Toronto", hour: "numeric", hourCycle: "h23" }).format(new Date()));
   return {
     today,
+    name: prof.name,
+    greeting: hour < 5 ? "Good night" : hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening",
     month,
     daysLeft: Math.round((Date.parse(end) - Date.parse(today)) / 86_400_000) + 1,
     spent: status.spent,
-    budget: status.budget,
-    band: status.band,
+    budget,
+    band: budgetBand(status.spent, budget),
     nextPayday: income ? nextPayday(income.schedule, today).paid : null,
     cash: bank.reduce((s, b) => s + b.balance_cents, 0),
     debts: -debts.reduce((s, b) => s + b.balance_cents, 0),
@@ -257,19 +275,23 @@ export async function getMonthSummary(month: MonthKey) {
   const { db, today } = await authed();
   const cats = await categories(db);
   const prev = monthKey(addMonths(`${month}-01`, -1));
-  const [rows, prevRows, lines] = await Promise.all([
+  const [rows, prevRows, lines, prof] = await Promise.all([
     monthLedger(db, month, cats),
     prev >= FIRST_MONTH ? monthLedger(db, prev, cats) : Promise.resolve([]),
     budgetLines(db, month),
+    profile(db),
   ]);
   const summary = summarize(rows);
   const before = summarize(prevRows);
+  const status = budgetStatus(lines, spentByCategory(rows));
+  const total = prof.monthlyBudget ?? status.budget;
   return {
     month,
     isCurrent: month === monthKey(today),
     isFuture: month > monthKey(today),
     summary,
-    budget: budgetStatus(lines, spentByCategory(rows)),
+    budget: { ...status, total, band: budgetBand(status.spent, total) },
+    adjustments: adjustmentRows(rows),
     previous: prevRows.length ? { spent: before.spent, income: before.income } : null,
     prevByCat: Object.fromEntries(before.expenses.map((e) => [e.category?.id ?? "__none", e.cents])),
     transactions: byCategory(rows),
@@ -284,37 +306,41 @@ export async function getHistorySummary() {
   const cats = await categories(db);
   const rows = await ledger(db, HISTORY.start, HISTORY.end, cats);
   const summary = summarize(rows);
-  // Month by month (Dec 2024 … Dec 2025).
-  const months: { month: MonthKey; income: number; spent: number }[] = [];
-  for (let m = monthKey(HISTORY.start); m <= monthKey(HISTORY.end); m = monthKey(addMonths(`${m}-01`, 1))) {
-    const s = summarize(rows.filter((r) => r.reportOn.startsWith(m)));
-    months.push({ month: m, income: s.income, spent: s.spent });
-  }
-  const recorded = months.filter((m) => m.spent > 0 || m.income > 0);
-  const biggest = rows
-    .filter((r) => r.in_reports && !r.is_transfer && r.amount_cents < 0 && r.category?.kind !== "transfer")
-    .sort((a, b) => a.amount_cents - b.amount_cents)
-    .slice(0, 5)
-    .map((r) => ({ id: r.id, date: r.date, description: r.description, amount_cents: r.amount_cents, category: r.category }));
+  const recorded = new Set(rows.filter((r) => r.in_reports && r.category?.kind !== "adjustment").map((r) => r.reportOn.slice(0, 7))).size;
   return {
     summary,
-    months,
-    monthsRecorded: recorded.length,
-    avgSpent: recorded.length ? Math.round(summary.spent / recorded.length) : 0,
-    avgIncome: recorded.length ? Math.round(summary.income / recorded.length) : 0,
-    biggest,
+    monthsRecorded: recorded,
+    avgSpent: recorded ? Math.round(summary.spent / recorded) : 0,
+    avgIncome: recorded ? Math.round(summary.income / recorded) : 0,
+    adjustments: adjustmentRows(rows),
     transactions: byCategory(rows),
   };
+}
+
+/** Spent per month since FIRST_MONTH, for the month picker. */
+export async function getMonthIndex() {
+  "use cache: private";
+  cacheLife({ stale: 300, revalidate: 300, expire: 3600 });
+  const { db, today } = await authed();
+  const cats = await categories(db);
+  const current = monthKey(today);
+  const rows = await ledger(db, `${FIRST_MONTH}-01`, monthRange(current).end, cats);
+  const months: { month: MonthKey; spent: number }[] = [];
+  for (let m = FIRST_MONTH; m <= current; m = monthKey(addMonths(`${m}-01`, 1))) {
+    months.push({ month: m, spent: summarize(rows.filter((r) => r.reportOn.startsWith(m))).spent });
+  }
+  return { current, months };
 }
 
 export async function getBudgets(month?: MonthKey) {
   const { db, today } = await session();
   const m = month ?? monthKey(today);
   const cats = await categories(db);
-  const [rows, lines] = await Promise.all([monthLedger(db, m, cats), budgetLines(db, m)]);
+  const [rows, lines, prof] = await Promise.all([monthLedger(db, m, cats), budgetLines(db, m), profile(db)]);
   const { end } = monthRange(m);
   return {
     month: m,
+    total: prof.monthlyBudget,
     daysLeft: m === monthKey(today) ? Math.round((Date.parse(end) - Date.parse(today)) / 86_400_000) + 1 : 0,
     status: budgetStatus(lines, spentByCategory(rows)),
     transactions: byCategory(rows),

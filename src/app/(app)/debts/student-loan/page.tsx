@@ -31,12 +31,21 @@ async function Loan() {
   if (!l) notFound();
   const total = l.owed + l.paid;
   const leftShare = total > 0 ? l.owed / total : 0;
+  const paidShare = total > 0 ? l.paid / total : 0;
 
   return (
     <>
       <section className="flex flex-col items-center pt-2">
         <h1 className="mb-6 text-lg font-semibold tracking-tight">Student loan</h1>
-        <Ring value={leftShare} size={264} stroke={18} label={`${Math.round(leftShare * 100)}% of the loan left`}>
+        {/* Red = still owed, green = paid so far (grows as EMIs go in). */}
+        <Ring
+          value={paidShare}
+          size={264}
+          stroke={18}
+          color="var(--money-in)"
+          track="var(--budget-over)"
+          label={`${Math.round(leftShare * 100)}% of the loan left, ${Math.round(paidShare * 100)}% paid`}
+        >
           <div className="flex flex-col items-center">
             <span className="rounded-full bg-surface-2 px-2.5 py-1 text-[11px] font-medium text-money-in">
               <span className="num">{formatCents(l.paid, { whole: true })}</span> paid
