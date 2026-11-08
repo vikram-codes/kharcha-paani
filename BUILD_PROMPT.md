@@ -249,6 +249,7 @@ Tapping a tile opens its section:
 
 ### 7.6 Transactions
 - Comfortable rows: colored category icon chip, merchant, category below it, amount on the right. Grouped by day, with a daily total in each group header. Greyed upcoming bills at the top (§6).
+- **Built Nov 8, 2026 (owner picked layout A "Grouped" from 3 mockups):** month header with arrows (back to Dec 2024; switches in place like Summary), search, filter chips (All / Cards / Chequing / Money in) + Transfers toggle (off by default), merchant names cleaned from bank descriptors (`src/lib/merchant.ts`). Tapping a row opens an edit sheet: Out/In + amount, category (all kinds, grouped), account, date, note, Save, Delete (tap twice). Split transactions show their lines read-only.
 - Search, plus filters for account, category, date range, amount, transfers on/off and uncategorized.
 - Mobile: swipe actions (change category, split), tap for detail. Desktop: a dense table with inline editing and bulk actions.
 

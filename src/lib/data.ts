@@ -600,11 +600,18 @@ export type ActivityRow = {
   category: Pick<CategoryInfo, "id" | "name" | "parentName" | "icon" | "color" | "kind"> | null;
   /** Category names when the transaction is split. */
   splits: { name: string; amount_cents: number }[];
+  accountId: string;
 };
 
 /** Transactions paid in a month (by payment date), newest first, plus upcoming bills. */
 export async function getActivity(month?: MonthKey) {
-  const { db, today } = await session();
+  await connection();
+  return activityData(month);
+}
+
+/** Same, without connection() so a Server Action can call it (month switching). */
+export async function activityData(month?: MonthKey) {
+  const { db, today } = await authed();
   const m = month ?? monthKey(today);
   const { start, end } = monthRange(m);
   const cats = await categories(db);
@@ -612,7 +619,7 @@ export async function getActivity(month?: MonthKey) {
     db
       .from("transactions")
       .select(
-        "id,date,description,note,amount_cents,is_transfer,in_reports,source,category_id,account:accounts!transactions_account_id_fkey(name,account_group),transaction_splits(category_id,amount_cents)",
+        "id,date,description,note,amount_cents,is_transfer,in_reports,source,category_id,account_id,account:accounts!transactions_account_id_fkey(name,account_group),transaction_splits(category_id,amount_cents)",
       )
       .gte("date", start)
       .lte("date", end)
@@ -637,7 +644,66 @@ export async function getActivity(month?: MonthKey) {
       isTransfer: r.is_transfer || c?.kind === "transfer",
       category: c ? { id: c.id, name: c.name, parentName: c.parentName, icon: c.icon, color: c.color, kind: c.kind } : null,
       splits: r.transaction_splits.map((s) => ({ name: (s.category_id && cats.get(s.category_id)?.name) || "Uncategorized", amount_cents: Number(s.amount_cents) })),
+      accountId: r.account_id,
     };
   });
-  return { month: m, today, rows: list, upcoming: bills };
+  return { month: m, today, current: monthKey(today), rows: list, upcoming: bills };
+}
+
+/** First month the transaction list goes back to (Money Pro history starts here). */
+export const FIRST_ACTIVITY_MONTH: MonthKey = "2024-12";
+
+/** Options for the edit sheet: accounts you can pay from + every subcategory, grouped. */
+export async function getEditOptions() {
+  const { db } = await authed();
+  const [accounts, cats] = await Promise.all([
+    db.from("accounts").select("id,key,name,account_group,last4,sort_order").in("account_group", SPEND_GROUPS).eq("archived", false).order("sort_order").then(ok),
+    categories(db),
+  ]);
+  const subs = [...cats.values()].filter((c) => c.parentName);
+  const order: CategoryInfo["kind"][] = ["expense", "income", "transfer", "reimbursement", "adjustment"];
+  return {
+    accounts: accounts.filter((a) => a.account_group === "debt_card" || a.key.includes("chequing")).map((a) => ({ id: a.id, name: a.name, last4: a.last4 })),
+    categories: subs
+      .sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || (a.parentName ?? "").localeCompare(b.parentName ?? "") || a.name.localeCompare(b.name))
+      .map((c) => ({ id: c.id, name: c.name, parent: c.parentName, kind: c.kind, icon: c.icon, color: c.color })),
+  };
+}
+
+export type TransactionPatch = { amountCents: number; categoryId: string | null; accountId: string; date: ISODate; note: string | null };
+
+/** Edits a transaction. The sign of amountCents is the direction (negative = money out / card purchase). */
+export async function updateTransaction(id: string, patch: TransactionPatch) {
+  const { db } = await authed();
+  if (!Number.isInteger(patch.amountCents) || patch.amountCents === 0 || Math.abs(patch.amountCents) > 100_000_000) throw new Error("Enter an amount.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(patch.date)) throw new Error("Pick a valid date.");
+  const [tx, category, account] = await Promise.all([
+    db.from("transactions").select("id,account_id,transaction_splits(id)").eq("id", id).maybeSingle().then(okMaybe),
+    patch.categoryId ? db.from("categories").select("id,kind").eq("id", patch.categoryId).maybeSingle().then(okMaybe) : Promise.resolve(null),
+    db.from("accounts").select("id").eq("id", patch.accountId).maybeSingle().then(okMaybe),
+  ]);
+  if (!tx) throw new Error("Transaction not found.");
+  if (patch.categoryId && !category) throw new Error("Choose a category.");
+  if (!account) throw new Error("Choose an account.");
+  const split = tx.transaction_splits.length > 0;
+  ok(
+    await db
+      .from("transactions")
+      .update({
+        amount_cents: patch.amountCents,
+        account_id: account.id,
+        date: patch.date,
+        note: patch.note?.trim().slice(0, 200) || null,
+        // A split transaction's categories live on its split lines.
+        ...(split ? {} : { category_id: category?.id ?? null, is_transfer: category?.kind === "transfer" }),
+      })
+      .eq("id", id)
+      .select("id"),
+  );
+}
+
+export async function deleteTransaction(id: string) {
+  const { db } = await authed();
+  const rows = ok(await db.from("transactions").delete().eq("id", id).select("id"));
+  if (!rows.length) throw new Error("Transaction not found.");
 }
