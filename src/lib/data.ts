@@ -117,6 +117,13 @@ async function ledger(db: Db, start: ISODate, end: ISODate, cats: Map<string, Ca
     rows.push(...last);
   }
   const accountName = new Map(accounts.map((a) => [a.id, a.name]));
+  // Money a friend owes you on a transaction isn't your spending (§6): take it off that line.
+  const txIds = [...new Set(rows.filter((r) => !r.is_split && Number(r.amount_cents) < 0).map((r) => r.line_id!))];
+  const owedByTx = new Map<string, number>();
+  for (let i = 0; i < txIds.length; i += 300) {
+    const part = ok(await db.from("shared_debts").select("transaction_id,amount_cents").in("transaction_id", txIds.slice(i, i + 300)));
+    for (const o of part) owedByTx.set(o.transaction_id!, (owedByTx.get(o.transaction_id!) ?? 0) + Number(o.amount_cents));
+  }
   return rows.map((r) => ({
     id: r.line_id!,
     date: r.date as ISODate,
@@ -124,7 +131,7 @@ async function ledger(db: Db, start: ISODate, end: ISODate, cats: Map<string, Ca
     description: r.is_split && r.note ? `${r.description} · ${r.note}` : (r.description ?? ""),
     account: accountName.get(r.account_id!) ?? "",
     split: Boolean(r.is_split),
-    amount_cents: Number(r.amount_cents),
+    amount_cents: Number(r.amount_cents) + (r.is_split ? 0 : (owedByTx.get(r.line_id!) ?? 0)),
     is_transfer: Boolean(r.is_transfer),
     in_reports: Boolean(r.in_reports),
     category: r.category_id ? (cats.get(r.category_id) ?? null) : null,
@@ -601,6 +608,8 @@ export type ActivityRow = {
   /** Category names when the transaction is split. */
   splits: { name: string; amount_cents: number }[];
   accountId: string;
+  /** Part of this transaction friends owe you. */
+  owed: { id: string; person: string; amount_cents: number; settled: boolean }[];
 };
 
 /** Transactions paid in a month (by payment date), newest first, plus upcoming bills. */
@@ -619,7 +628,7 @@ export async function activityData(month?: MonthKey) {
     db
       .from("transactions")
       .select(
-        "id,date,description,note,amount_cents,is_transfer,in_reports,source,category_id,account_id,account:accounts!transactions_account_id_fkey(name,account_group),transaction_splits(category_id,amount_cents)",
+        "id,date,description,note,amount_cents,is_transfer,in_reports,source,category_id,account_id,account:accounts!transactions_account_id_fkey(name,account_group),transaction_splits(category_id,amount_cents),shared_debts!shared_debts_transaction_id_fkey(id,person,amount_cents,settled_at)",
       )
       .gte("date", start)
       .lte("date", end)
@@ -645,6 +654,7 @@ export async function activityData(month?: MonthKey) {
       category: c ? { id: c.id, name: c.name, parentName: c.parentName, icon: c.icon, color: c.color, kind: c.kind } : null,
       splits: r.transaction_splits.map((s) => ({ name: (s.category_id && cats.get(s.category_id)?.name) || "Uncategorized", amount_cents: Number(s.amount_cents) })),
       accountId: r.account_id,
+      owed: r.shared_debts.map((o) => ({ id: o.id, person: o.person, amount_cents: Number(o.amount_cents), settled: !!o.settled_at })),
     };
   });
   return { month: m, today, current: monthKey(today), rows: list, upcoming: bills };
@@ -858,4 +868,105 @@ export async function undoImport(id: string) {
   if (!imp || imp.status !== "committed") throw new Error("Nothing to undo.");
   ok(await db.from("transactions").delete().eq("import_id", id).select("id"));
   ok(await db.from("imports").update({ status: "undone" }).eq("id", id).select("id"));
+}
+
+// ───────────────────────────── editing: budgets, balances, money owed to you ─────────────────────────────
+
+/** Change the headline monthly budget (the round number, e.g. $3,000). */
+export async function setMonthlyBudget(cents: number) {
+  const { db } = await authed();
+  if (!Number.isInteger(cents) || cents < 0 || cents > 10_000_000) throw new Error("Enter a valid amount.");
+  const p = okMaybe(await db.from("profiles").select("user_id").maybeSingle());
+  if (!p) throw new Error("Profile not found.");
+  ok(await db.from("profiles").update({ monthly_budget_cents: cents }).eq("user_id", p.user_id).select("user_id"));
+}
+
+/**
+ * Set budget line amounts. scope "month" = override for that month only;
+ * "default" = from now on (also clears that month's override so it takes effect).
+ */
+export async function setBudgetLines(month: MonthKey, scope: "month" | "default", lines: { id: string; cents: number }[]) {
+  const { db } = await authed();
+  for (const l of lines) if (!Number.isInteger(l.cents) || l.cents < 0 || l.cents > 10_000_000) throw new Error("Enter valid amounts.");
+  const owned = new Set(ok(await db.from("budget_lines").select("id").in("id", lines.map((l) => l.id))).map((r) => r.id));
+  const valid = lines.filter((l) => owned.has(l.id));
+  const monthDate = `${month}-01`;
+  if (scope === "month") {
+    if (valid.length)
+      ok(await db.from("budgets").upsert(valid.map((l) => ({ line_id: l.id, month: monthDate, amount_cents: l.cents })), { onConflict: "user_id,line_id,month" }).select("id"));
+  } else {
+    for (const l of valid) ok(await db.from("budget_lines").update({ default_cents: l.cents }).eq("id", l.id).select("id"));
+    if (valid.length) ok(await db.from("budgets").delete().eq("month", monthDate).in("line_id", valid.map((l) => l.id)).select("id"));
+  }
+}
+
+/**
+ * "This account is actually $X today": records a reconcile snapshot. Later
+ * transactions add on; anything dated today or earlier is treated as included.
+ * For debts pass what you owe as a positive number.
+ */
+export async function reconcileAccount(accountId: string, cents: number) {
+  const { db, today } = await authed();
+  if (!Number.isInteger(cents) || Math.abs(cents) > 1_000_000_000) throw new Error("Enter a valid amount.");
+  const acct = okMaybe(await db.from("accounts").select("id,account_group").eq("id", accountId).maybeSingle());
+  if (!acct) throw new Error("Account not found.");
+  if (acct.account_group === "cash_emergency") throw new Error("Unlock the emergency fund to change it.");
+  const signed = acct.account_group.startsWith("debt_") ? -Math.abs(cents) : cents;
+  ok(await db.from("balance_snapshots").insert({ account_id: acct.id, as_of: today, amount_cents: signed, kind: "reconcile", note: "Updated by owner" }).select("id"));
+}
+
+export type OwedItem = { id: string; person: string; amount_cents: number; note: string | null; created_at: string; transaction: { date: string; description: string } | null };
+
+export async function listOwed(): Promise<{ open: OwedItem[]; settled: (OwedItem & { settled_at: string })[] }> {
+  const { db } = await authed();
+  const rows = ok(
+    await db
+      .from("shared_debts")
+      .select("id,person,amount_cents,note,created_at,settled_at,transaction:transactions!shared_debts_transaction_id_fkey(date,description)")
+      .order("created_at", { ascending: false })
+      .limit(100),
+  );
+  const map = (r: (typeof rows)[number]): OwedItem => ({
+    id: r.id,
+    person: r.person,
+    amount_cents: Number(r.amount_cents),
+    note: r.note,
+    created_at: r.created_at,
+    transaction: r.transaction ? { date: r.transaction.date, description: r.transaction.description } : null,
+  });
+  return {
+    open: rows.filter((r) => !r.settled_at).map(map),
+    settled: rows.filter((r) => r.settled_at).slice(0, 10).map((r) => ({ ...map(r), settled_at: r.settled_at! })),
+  };
+}
+
+/** Someone owes you: on its own, or part of a transaction (that part leaves your spending). */
+export async function addOwed(input: { person: string; amountCents: number; note?: string; transactionId?: string }) {
+  const { db } = await authed();
+  const person = input.person.trim().slice(0, 60);
+  if (!person) throw new Error("Who owes you?");
+  if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) throw new Error("Enter an amount.");
+  if (input.transactionId) {
+    const tx = okMaybe(await db.from("transactions").select("id,amount_cents").eq("id", input.transactionId).maybeSingle());
+    if (!tx) throw new Error("Transaction not found.");
+    const already = ok(await db.from("shared_debts").select("amount_cents").eq("transaction_id", tx.id)).reduce((t, r) => t + Number(r.amount_cents), 0);
+    if (already + input.amountCents > Math.abs(Number(tx.amount_cents))) throw new Error("That's more than the transaction.");
+  }
+  ok(
+    await db
+      .from("shared_debts")
+      .insert({ person, amount_cents: input.amountCents, note: input.note?.trim().slice(0, 200) || null, transaction_id: input.transactionId ?? null })
+      .select("id"),
+  );
+}
+
+export async function settleOwed(id: string) {
+  const { db, today } = await authed();
+  const rows = ok(await db.from("shared_debts").update({ settled_at: today }).eq("id", id).is("settled_at", null).select("id"));
+  if (!rows.length) throw new Error("Already settled.");
+}
+
+export async function deleteOwed(id: string) {
+  const { db } = await authed();
+  ok(await db.from("shared_debts").delete().eq("id", id).select("id"));
 }

@@ -26,5 +26,5 @@ export default function CashPage() {
 
 async function Cash() {
   const c = await getCash();
-  return <CashOverview bank={c.bank} bankTotal={c.bankTotal} emergency={c.emergency} owedToMe={c.owedToMe} />;
+  return <CashOverview bank={c.bank} bankTotal={c.bankTotal} emergency={c.emergency} />;
 }

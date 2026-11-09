@@ -1,14 +1,16 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { Loader2, Split, Trash2 } from "lucide-react";
+import { HandCoins, Loader2, Split, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   loadEditOptions,
   removeTransaction,
   saveTransaction,
 } from "@/app/actions/activity";
+import { addOwedAction } from "@/app/actions/editing";
 import { CategoryChip } from "@/components/category-icon";
+import { MoneyInput, centsToInput, toCents } from "@/components/money-input";
 import { ThemedSelect, type SelectOption } from "@/components/themed-select";
 import { ResponsiveSheetContent } from "@/components/ui/responsive-sheet";
 import { Sheet, SheetDescription, SheetTitle } from "@/components/ui/sheet";
@@ -262,6 +264,10 @@ function EditForm({
         />
       </label>
 
+      {row.amount_cents < 0 && !row.isTransfer && row.splits.length === 0 && (
+        <FriendOwes row={row} onChanged={onChanged} />
+      )}
+
       <div className="grid grid-cols-[auto_1fr] gap-2">
         <button
           type="button"
@@ -292,6 +298,69 @@ function EditForm({
           {row.source === "seed" ? "your statements/history" : row.source}.
           Edits change your balances.
         </p>
+      )}
+    </div>
+  );
+}
+
+/** "A friend owes me part of this": that part leaves your spending and goes on your Owed list. */
+function FriendOwes({ row, onChanged }: { row: ActivityRow; onChanged: () => void }) {
+  const total = Math.abs(row.amount_cents);
+  const owedSoFar = row.owed.reduce((t, o) => t + o.amount_cents, 0);
+  const [open, setOpen] = useState(false);
+  const [person, setPerson] = useState("");
+  const [amount, setAmount] = useState(centsToInput(Math.round((total - owedSoFar) / 2)));
+  const [busy, start] = useTransition();
+  const cents = toCents(amount);
+
+  const add = () =>
+    cents &&
+    start(async () => {
+      const res = await addOwedAction({ person, amountCents: cents, transactionId: row.id });
+      if (!res.ok) return void toast.error(res.error);
+      toast.success(`${person} owes you ${formatCents(cents)}`);
+      setOpen(false);
+      setPerson("");
+      onChanged();
+    });
+
+  return (
+    <div className="rounded-xl bg-surface-1 p-3">
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-2 text-sm">
+          <HandCoins className="size-4 text-muted-foreground" />
+          {row.owed.length ? (
+            <span>
+              {row.owed.map((o) => `${o.person} ${formatCents(o.amount_cents)}${o.settled ? " ✓" : ""}`).join(" · ")}
+              <span className="block text-[11px] text-muted-foreground">Your share: {formatCents(total - owedSoFar)}</span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">Did someone owe you part of this?</span>
+          )}
+        </span>
+        {!open && owedSoFar < total && (
+          <button type="button" onClick={() => setOpen(true)} className="rounded-full bg-surface-2 px-3 py-1.5 text-xs font-medium">
+            Friend owes me
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="mt-3 flex flex-col gap-2">
+          <div className="grid grid-cols-[1fr_7.5rem] gap-2">
+            <input value={person} onChange={(e) => setPerson(e.target.value)} placeholder="Who?" maxLength={60} className="h-11 rounded-xl bg-surface-2 px-3 text-sm ring-1 ring-border outline-none focus:ring-2 focus:ring-lime" />
+            <MoneyInput value={amount} onChange={setAmount} className="bg-surface-2" ariaLabel="Amount they owe" />
+          </div>
+          <div className="flex gap-1.5 text-xs">
+            {[0.5, 1 / 3, 0.25].map((f) => (
+              <button key={f} type="button" onClick={() => setAmount(centsToInput(Math.round(total * f)))} className="rounded-full bg-surface-2 px-2.5 py-1 text-muted-foreground">
+                {f === 0.5 ? "Half" : f === 0.25 ? "Quarter" : "Third"}
+              </button>
+            ))}
+          </div>
+          <button type="button" disabled={busy || !person.trim() || !cents} onClick={add} className="flex h-10 items-center justify-center rounded-xl bg-lime text-sm font-semibold text-on-lime disabled:opacity-40">
+            {busy ? <Loader2 className="size-4 animate-spin" /> : "Add to Owed to you"}
+          </button>
+        </div>
       )}
     </div>
   );

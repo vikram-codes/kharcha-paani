@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
+import { BudgetEditor } from "@/components/budget-editor";
 import { CategoryBreakdown, type BreakdownRow } from "@/components/category-breakdown";
 import { Reveal } from "@/components/reveal";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -37,7 +38,15 @@ async function Budgets() {
   return (
     <div className="flex flex-col gap-5">
       <section className="rounded-3xl bg-surface-1 p-5 ring-1 ring-border">
-        <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">{formatMonthName(d.month)} budget</p>
+        <div className="flex items-center justify-between">
+          <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">{formatMonthName(d.month)} budget</p>
+          <BudgetEditor
+            key={s.lines.map((l) => `${l.id}:${l.budget}`).join("|") + `:${d.total}`}
+            month={d.month}
+            total={d.total}
+            lines={s.lines.map((l) => ({ id: l.id, name: l.name, kind: l.kind, budget: l.budget, icon: l.icon, color: l.color }))}
+          />
+        </div>
         <p className="num mt-2 text-[40px] leading-none font-semibold tracking-tight">
           {money(s.spent)}
           <span className="text-lg font-medium text-muted-foreground"> / {money(total)}</span>

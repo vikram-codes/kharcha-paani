@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { CalendarClock, ChevronRight, CreditCard, GraduationCap } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { UpdateBalance } from "@/components/update-balance";
 import { bandColorVar, budgetBand } from "@/lib/budget";
 import { getDebts } from "@/lib/data";
 import { formatCents } from "@/lib/money";
@@ -47,7 +48,18 @@ async function Debts() {
                       {c.apr ? ` · ${c.apr}% APR` : ""}
                     </span>
                   </span>
-                  <span className="num text-lg font-semibold">{formatCents(c.owed)}</span>
+                  <UpdateBalance
+                    accountId={c.account_id}
+                    name={c.name}
+                    current={c.owed}
+                    debt
+                    trigger={
+                      <button type="button" className="flex flex-col items-end" aria-label={`Update ${c.name} balance`}>
+                        <span className="num text-lg font-semibold">{formatCents(c.owed)}</span>
+                        <span className="text-[11px] text-lime-ink">Update</span>
+                      </button>
+                    }
+                  />
                 </div>
                 {c.limit != null && used != null && (
                   <div className="mt-3">
@@ -78,7 +90,18 @@ async function Debts() {
                   <CalendarClock className="size-[18px]" />
                 </span>
                 <span className="flex-1 text-sm font-medium">{p.name}</span>
-                <span className="num text-sm font-semibold">{p.owed === 0 ? "Paid off" : formatCents(p.owed)}</span>
+                <UpdateBalance
+                  accountId={p.account_id}
+                  name={p.name}
+                  current={p.owed}
+                  debt
+                  trigger={
+                    <button type="button" className="flex flex-col items-end" aria-label={`Update ${p.name} balance`}>
+                      <span className="num text-sm font-semibold">{p.owed === 0 ? "Paid off" : formatCents(p.owed)}</span>
+                      <span className="text-[11px] text-lime-ink">Update</span>
+                    </button>
+                  }
+                />
               </div>
             ))}
           </div>

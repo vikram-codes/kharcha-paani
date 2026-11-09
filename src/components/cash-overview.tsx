@@ -1,10 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { HandCoins, Landmark, Lock, LockOpen, ShieldCheck } from "lucide-react";
+import { Landmark, Lock, LockOpen, ShieldCheck } from "lucide-react";
 import { AnimatedCents } from "@/components/animated-number";
 import { EmergencyPinSheet } from "@/components/emergency-pin";
-import { formatCents } from "@/lib/money";
+import { OwedPanel } from "@/components/owed-panel";
+import { UpdateBalance } from "@/components/update-balance";
 
 type Bank = { id: string; name: string; cents: number; institution: string | null; last4: string | null };
 
@@ -13,12 +14,10 @@ export function CashOverview({
   bank,
   bankTotal,
   emergency,
-  owedToMe,
 }: {
   bank: Bank[];
   bankTotal: number;
   emergency: { id: string; name: string; institution: string | null } | null;
-  owedToMe: number;
 }) {
   const [revealed, setRevealed] = useState<number | null>(null);
   const [pinOpen, setPinOpen] = useState(false);
@@ -50,7 +49,18 @@ export function CashOverview({
                   {b.last4 ? ` · •••• ${b.last4}` : ""}
                 </span>
               </span>
-              <AnimatedCents value={b.cents} className="num text-base font-semibold" />
+              <UpdateBalance
+                accountId={b.id}
+                name={b.name}
+                current={b.cents}
+                debt={false}
+                trigger={
+                  <button type="button" className="flex flex-col items-end" aria-label={`Update ${b.name} balance`}>
+                    <AnimatedCents value={b.cents} className="num text-base font-semibold" />
+                    <span className="text-[11px] text-lime-ink">Update</span>
+                  </button>
+                }
+              />
             </div>
           ))}
         </div>
@@ -85,18 +95,7 @@ export function CashOverview({
         </section>
       )}
 
-      {owedToMe > 0 && (
-        <section className="flex items-center gap-3 rounded-2xl bg-surface-1/60 p-4 text-muted-foreground">
-          <span className="grid size-10 place-items-center rounded-xl bg-surface-2">
-            <HandCoins className="size-[18px]" />
-          </span>
-          <span className="flex-1 text-sm">
-            Owed to you
-            <span className="block text-xs">Not counted in Cash until it&apos;s paid back.</span>
-          </span>
-          <span className="num text-sm">{formatCents(owedToMe)}</span>
-        </section>
-      )}
+      <OwedPanel />
 
       <EmergencyPinSheet open={pinOpen} onOpenChange={setPinOpen} institution={emergency?.institution} onUnlocked={setRevealed} />
     </div>
