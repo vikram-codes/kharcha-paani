@@ -55,6 +55,8 @@ export type Database = {
           monthly_payment_cents: number | null
           name: string
           note: string | null
+          reported_balance_cents: number | null
+          reported_on: string | null
           sort_order: number
           user_id: string
         }
@@ -73,6 +75,8 @@ export type Database = {
           monthly_payment_cents?: number | null
           name: string
           note?: string | null
+          reported_balance_cents?: number | null
+          reported_on?: string | null
           sort_order?: number
           user_id?: string
         }
@@ -91,6 +95,8 @@ export type Database = {
           monthly_payment_cents?: number | null
           name?: string
           note?: string | null
+          reported_balance_cents?: number | null
+          reported_on?: string | null
           sort_order?: number
           user_id?: string
         }

@@ -374,7 +374,7 @@ export async function getDebts() {
   const { db, today } = await session();
   const [bal, meta] = await Promise.all([
     balances(db),
-    db.from("accounts").select("id,institution,last4,credit_limit_cents,apr").then(ok),
+    db.from("accounts").select("id,institution,last4,credit_limit_cents,apr,reported_balance_cents,reported_on").then(ok),
   ]);
   const loan = await getLoanFor(db, today, bal);
   const info = new Map(meta.map((m) => [m.id, m]));
@@ -387,6 +387,8 @@ export async function getDebts() {
       last4: m?.last4 ?? null,
       limit: m?.credit_limit_cents != null ? Number(m.credit_limit_cents) : null,
       apr: m?.apr != null ? Number(m.apr) : null,
+      // What the bank showed when the owner last checked; the gap is spending not entered yet.
+      reported: m?.reported_balance_cents != null ? { owed: -Number(m.reported_balance_cents), on: m.reported_on as ISODate } : null,
     };
   };
   const cards = bal.filter((b) => b.account_group === "debt_card").map(withInfo);

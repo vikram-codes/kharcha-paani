@@ -133,6 +133,7 @@ Rules baked into the seed (keep them in the app):
 - Rent: $650 + utilities before Sep 2026, and **$700 including utilities** from Sep 2026.
 - Load the seed into `expense-dev` first, check that balances and month totals match, then load it into `expense-prod`.
 - Data after each statement's end date (to Nov 7, 2026) will be entered manually by the owner while testing the app.
+- **Updated Nov 8, 2026: cards are anchored to their latest statements** (Triangle $2,995.00 and CIBC $1,579.50 on Oct 18; Scene+ Visa $0.00 on Nov 5), plus CIBC payments made after its statement ($200 e-Transfer sent Oct 17, $229.24 on Oct 26). The owner's Nov 7 banking-app balances are kept as `accounts.reported_balance_cents`, and Debts shows **"Still to add"** = reported − computed until the missing purchases are entered (Triangle $2,675.00, CIBC $1,579.74 at the time). This replaces the reconciliation-adjustment approach below.
 - **Current balances (Nov 7, 2026) come from the owner, not the statements:** Triangle $5,670, CIBC $2,730, Scotia Visa $0. The gap between the statements and these balances is seeded as **reconciliation adjustments** (`accounts.json → reconciliations`; it includes an Oct return flight to India). As the owner enters the real transactions, the adjustment **shrinks automatically**, so the balance stays correct the whole time.
 
 Ongoing importers still need to handle CSV downloads from each bank. When the first one is uploaded, read its exact columns. Don't guess formats.

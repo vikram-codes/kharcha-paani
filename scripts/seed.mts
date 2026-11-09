@@ -29,6 +29,8 @@ type SeedAccount = {
   key: string; name: string; group: string; institution?: string; last4?: string;
   limit?: number; apr?: number; hidden?: boolean; balance?: number | null; as_of?: string;
   currency?: string; balance_inr?: number; implied_rate_inr_per_cad?: number; emi_cad?: number; _note?: string;
+  reported_balance?: number; reported_on?: string;
+  post_statement_payments?: { date: string; amount: number; note: string }[];
 };
 type SeedAccountsFile = {
   accounts: SeedAccount[];
@@ -136,6 +138,8 @@ const accountRows = must(
       currency: a.currency === "INR" ? "INR" : "CAD",
       hidden: a.hidden ?? false,
       monthly_payment_cents: a.emi_cad != null ? cents(a.emi_cad) : null,
+      reported_balance_cents: a.reported_balance != null ? (a.group.startsWith("debt_") ? -1 : 1) * cents(a.reported_balance) : null,
+      reported_on: a.reported_on ?? null,
       sort_order: i,
       note: a._note ?? null,
     })),
@@ -233,6 +237,16 @@ for (const [i, r] of txRows.entries()) {
   must(await db.from("transaction_splits").insert(parts).select("id"));
   splitCount += parts.length;
 }
+
+// Card payments made after a card's last statement (known from chequing), on the card side.
+const ccPayment = categoryId.get("cc_payment");
+const postPayments = accountsFile.accounts.flatMap((a) =>
+  (a.post_statement_payments ?? []).map((p) => ({
+    user_id: userId, account_id: accountId.get(a.key), date: p.date, amount_cents: cents(p.amount),
+    description: "Payment (from chequing)", note: p.note, category_id: ccPayment, is_transfer: true, source: "seed", import_id: imp.id,
+  })),
+);
+if (postPayments.length) must(await db.from("transactions").insert(postPayments).select("id"));
 
 // Known upcoming payments (owner-confirmed, §3.2 / §7.7)
 const chq = accountId.get("scotia_chequing");

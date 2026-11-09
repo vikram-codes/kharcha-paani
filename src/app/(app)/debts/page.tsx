@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { UpdateBalance } from "@/components/update-balance";
 import { bandColorVar, budgetBand } from "@/lib/budget";
 import { getDebts } from "@/lib/data";
+import { formatShort } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
 
 export const metadata: Metadata = { title: "Debts" };
@@ -63,6 +64,16 @@ async function Debts() {
                     }
                   />
                 </div>
+                {c.reported && c.reported.owed - c.owed > 50 && (
+                  <div className="mt-3 rounded-xl bg-budget-high/10 px-3 py-2 text-xs">
+                    <p className="font-medium text-budget-high">
+                      Still to add: <span className="num">{formatCents(c.reported.owed - c.owed)}</span>
+                    </p>
+                    <p className="mt-0.5 text-muted-foreground">
+                      Your bank showed <span className="num">{formatCents(c.reported.owed)}</span> on {formatShort(c.reported.on)}. Add the purchases since the last statement and this reaches $0.
+                    </p>
+                  </div>
+                )}
                 {c.limit != null && used != null && (
                   <div className="mt-3">
                     <div className="h-1.5 overflow-hidden rounded-full bg-surface-3">
