@@ -87,8 +87,8 @@ RULES = [  # (regex on description, category key)
 # Known e-Transfers resolved from cross-matching (amount+date) with card statements / Cashew
 TRIANGLE_PAYMENTS = {("2026-08-03", -153.00), ("2026-08-08", -362.67), ("2026-08-17", -220.75),
                      ("2026-08-20", -200.00), ("2026-09-18", -483.12), ("2026-10-05", -200.00)}
-# Owner, Nov 8: the Oct 17 $200 e-Transfer went to the CIBC card (posts after the Oct 18 statement).
-CIBC_PAYMENTS = {("2026-10-17", -200.00)}
+# Owner, Nov 9 (corrected): the Oct 17 $200 e-Transfer went to the Triangle card (posted after its Oct 18 statement).
+CIBC_PAYMENTS = {("2026-10-17", -200.00)}  # name kept; it's a card payment either way
 RENT_GUESSES = {("2026-08-01", -650.00): "confirmed: rent $650 (before Sep, utilities were extra)",
                 ("2026-08-05", -60.00): "confirmed: utilities on top of $650 rent",
                 ("2026-09-02", -700.00): "confirmed: rent $700 incl. utilities from Sep",
@@ -112,7 +112,7 @@ for r in rows:
         if r["amount"] < 0 and k in TRIANGLE_PAYMENTS:
             key, note = "cc_payment", "e-Transfer matched to Triangle payment (same date & amount)"
         elif r["amount"] < 0 and k in CIBC_PAYMENTS:
-            key, conf, note = "cc_payment", "confirmed", "Owner: payment to the CIBC card"
+            key, conf, note = "cc_payment", "confirmed", "Owner: e-Transfer to the Triangle card"
         elif r["amount"] < 0 and k in RENT_GUESSES:
             key, note = "rent", RENT_GUESSES[k]
             conf = "confirmed" if "confirmed" in note else "guess"
