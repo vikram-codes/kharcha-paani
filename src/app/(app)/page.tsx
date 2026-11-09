@@ -8,8 +8,8 @@ import { getSavingsPrompts } from "@/lib/data";
 /**
  * Home (owner picked Nov 9 2026).
  * Phone: Cash → savings prompts → spent vs budget → Debts + Investments → Coming up.
- * Desktop (lg+): two columns (left: Cash, Debts + Investments; right: spent vs budget,
- * where it went, recent) with Coming up across the bottom.
+ * Desktop (lg+): two columns. Left: spent vs budget, where it went, recent.
+ * Right: Cash, Debts + Investments, Coming up.
  * The column wrappers are `display: contents` on phones, so `order` puts the
  * cards in the phone sequence; on desktop they become real columns.
  */
@@ -29,7 +29,20 @@ async function Home() {
   return (
     <div className="flex flex-col gap-5">
       <Greeting h={d.h} />
-      <div className="flex flex-col gap-5 lg:grid lg:grid-cols-2">
+      <div className="flex flex-col gap-5 lg:grid lg:grid-cols-2 lg:items-start">
+        {/* Desktop left: this month */}
+        <div className="contents lg:flex lg:flex-col lg:gap-5">
+          <div className="order-3 lg:order-none">
+            <Budget h={d.h} />
+          </div>
+          <div className="hidden lg:block">
+            <TopCategories d={d} />
+          </div>
+          <div className="hidden lg:block">
+            <Recent d={d} />
+          </div>
+        </div>
+        {/* Desktop right: balances, then what's coming */}
         <div className="contents lg:flex lg:flex-col lg:gap-5">
           <div className="order-1 lg:order-none">
             <Cash h={d.h} />
@@ -42,23 +55,12 @@ async function Home() {
           <div className="order-4 lg:order-none">
             <Tiles h={d.h} cols={2} />
           </div>
+          {d.h.upcoming.length > 0 && (
+            <div className="order-5 lg:order-none">
+              <ComingUp h={d.h} />
+            </div>
+          )}
         </div>
-        <div className="contents lg:flex lg:flex-col lg:gap-5">
-          <div className="order-3 lg:order-none">
-            <Budget h={d.h} />
-          </div>
-          <div className="hidden lg:block">
-            <TopCategories d={d} />
-          </div>
-          <div className="hidden lg:block">
-            <Recent d={d} />
-          </div>
-        </div>
-        {d.h.upcoming.length > 0 && (
-          <div className="order-5 lg:order-none lg:col-span-2">
-            <ComingUp h={d.h} />
-          </div>
-        )}
       </div>
     </div>
   );
