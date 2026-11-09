@@ -8,6 +8,7 @@ import {
   removeTransaction,
   saveTransaction,
 } from "@/app/actions/activity";
+import { makeRuleAction, removeSplitsAction, saveSplitsAction } from "@/app/actions/categories";
 import { addOwedAction } from "@/app/actions/editing";
 import { CategoryChip } from "@/components/category-icon";
 import { MoneyInput, centsToInput, toCents } from "@/components/money-input";
@@ -98,6 +99,9 @@ function EditForm({
   const [date, setDate] = useState(row.date);
   const [note, setNote] = useState(row.note ?? "");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [splitting, setSplitting] = useState(false);
+  const [makeRule, setMakeRule] = useState(false);
+  const [applyPast, setApplyPast] = useState(false);
   const [busy, startBusy] = useTransition();
 
   const legacyAccount =
@@ -120,7 +124,11 @@ function EditForm({
         note: note || null,
       });
       if (!res.ok) return void toast.error(res.error);
-      toast.success("Saved");
+      if (makeRule && categoryId && categoryId !== (row.category?.id ?? "")) {
+        const r = await makeRuleAction(row.description, categoryId, applyPast);
+        if (!r.ok) toast.error(r.error);
+        else toast.success(`Saved · rule added${r.count ? ` · ${r.count} past transaction${r.count === 1 ? "" : "s"} updated` : ""}`);
+      } else toast.success("Saved");
       onChanged();
       onClose();
     });
@@ -187,24 +195,28 @@ function EditForm({
         </label>
       </div>
 
-      {/* Category */}
-      {row.splits.length > 0 ? (
-        <div className="rounded-xl bg-surface-1 p-3 text-sm">
-          <p className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Split className="size-3" /> Split across categories
-          </p>
-          {row.splits.map((s, i) => (
-            <p key={i} className="flex justify-between py-0.5">
-              <span>{s.name}</span>
-              <span className="num">{formatCents(s.amount_cents)}</span>
-            </p>
-          ))}
-        </div>
+      {/* Category, or split across categories */}
+      {splitting || row.splits.length > 0 ? (
+        <SplitEditor
+          row={row}
+          options={categoryOptions(opts)}
+          total={cents}
+          onDone={() => {
+            onChanged();
+            onClose();
+          }}
+          onCancel={row.splits.length ? onClose : () => setSplitting(false)}
+        />
       ) : (
         <div>
-          <span className="mb-1 block px-1 text-xs text-muted-foreground">
-            Category
-          </span>
+          <div className="mb-1 flex items-center justify-between px-1">
+            <span className="text-xs text-muted-foreground">Category</span>
+            {row.amount_cents !== 0 && !row.isTransfer && (
+              <button type="button" onClick={() => setSplitting(true)} className="flex items-center gap-1 text-xs font-medium text-lime-ink">
+                <Split className="size-3" /> Split
+              </button>
+            )}
+          </div>
           <ThemedSelect
             ariaLabel="Category"
             value={categoryId || null}
@@ -213,6 +225,18 @@ function EditForm({
             placeholder="Uncategorized"
             options={categoryOptions(opts)}
           />
+          {categoryId && categoryId !== (row.category?.id ?? "") && (
+            <div className="mt-2 flex flex-col gap-1.5 rounded-xl bg-surface-1 p-3 text-xs">
+              <Toggle checked={makeRule} onChange={setMakeRule}>
+                Always put <span className="font-medium text-foreground">{rowTitle(row)}</span> in this category
+              </Toggle>
+              {makeRule && (
+                <Toggle checked={applyPast} onChange={setApplyPast}>
+                  Also change past {rowTitle(row)} transactions
+                </Toggle>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -362,6 +386,116 @@ function FriendOwes({ row, onChanged }: { row: ActivityRow; onChanged: () => voi
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function Toggle({ checked, onChange, children }: { checked: boolean; onChange: (v: boolean) => void; children: React.ReactNode }) {
+  return (
+    <label className="flex cursor-pointer items-center gap-2.5 text-muted-foreground">
+      <span className="relative grid size-5 shrink-0 place-items-center">
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          className="peer size-5 cursor-pointer appearance-none rounded-md bg-surface-2 ring-1 ring-border checked:bg-lime checked:ring-lime"
+        />
+        <svg viewBox="0 0 16 16" className="pointer-events-none absolute size-3.5 text-on-lime opacity-0 peer-checked:opacity-100" aria-hidden>
+          <path d="M3 8.5l3 3 7-7" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </span>
+      <span>{children}</span>
+    </label>
+  );
+}
+
+/** Split one transaction across categories (§6). Lines must add up to the total exactly. */
+function SplitEditor({
+  row,
+  options,
+  total,
+  onDone,
+  onCancel,
+}: {
+  row: ActivityRow;
+  options: SelectOption[];
+  total: number;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const initial =
+    row.splits.length > 0
+      ? row.splits.map((s) => ({ categoryId: s.categoryId, amount: centsToInput(s.amount_cents) }))
+      : [
+          { categoryId: row.category?.id ?? null, amount: centsToInput(total) },
+          { categoryId: null as string | null, amount: "" },
+        ];
+  const [lines, setLines] = useState(initial);
+  const [busy, start] = useTransition();
+  const sum = lines.reduce((t, l) => t + (toCents(l.amount) ?? 0), 0);
+  const left = total - sum;
+  const set = (i: number, patch: Partial<(typeof lines)[number]>) => setLines((ls) => ls.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+
+  // Typing into a line takes the difference from the first line, so it always adds up.
+  const setAmount = (i: number, v: string) =>
+    setLines((ls) => {
+      const next = ls.map((l, j) => (j === i ? { ...l, amount: v } : l));
+      if (i !== 0) {
+        const others = next.slice(1).reduce((t, l) => t + (toCents(l.amount) ?? 0), 0);
+        next[0] = { ...next[0], amount: centsToInput(Math.max(0, total - others)) };
+      }
+      return next;
+    });
+
+  const save = () =>
+    start(async () => {
+      const res = await saveSplitsAction(
+        row.id,
+        lines.map((l) => ({ categoryId: l.categoryId ?? "", cents: toCents(l.amount) ?? 0 })),
+      );
+      if (!res.ok) return void toast.error(res.error);
+      toast.success("Split saved");
+      onDone();
+    });
+
+  const unsplit = () =>
+    start(async () => {
+      const res = await removeSplitsAction(row.id, lines[0]?.categoryId ?? null);
+      if (!res.ok) return void toast.error(res.error);
+      toast.success("Split removed");
+      onDone();
+    });
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl bg-surface-1 p-3">
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Split className="size-3" /> Split {formatCents(total)} across categories
+      </p>
+      {lines.map((l, i) => (
+        <div key={i} className="grid grid-cols-[1fr_7rem] gap-2">
+          <ThemedSelect size="sm" ariaLabel={`Line ${i + 1} category`} value={l.categoryId} onChange={(v) => set(i, { categoryId: v })} options={options} placeholder="Category…" warn />
+          <MoneyInput value={l.amount} onChange={(v) => setAmount(i, v)} className="h-9 bg-surface-2" ariaLabel={`Line ${i + 1} amount`} />
+        </div>
+      ))}
+      <div className="flex items-center justify-between text-xs">
+        <button type="button" onClick={() => setLines((ls) => [...ls, { categoryId: null, amount: "" }])} className="font-medium text-lime-ink">
+          + Add line
+        </button>
+        <span className={cn("num", left === 0 ? "text-money-in" : "text-budget-high")}>{left === 0 ? "Adds up ✓" : `${formatCents(Math.abs(left))} ${left > 0 ? "left" : "over"}`}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" onClick={row.splits.length ? unsplit : onCancel} disabled={busy} className="h-10 rounded-xl bg-surface-2 text-sm">
+          {row.splits.length ? "Remove split" : "Cancel"}
+        </button>
+        <button
+          type="button"
+          onClick={save}
+          disabled={busy || left !== 0 || lines.some((l) => !l.categoryId)}
+          className="flex h-10 items-center justify-center rounded-xl bg-lime text-sm font-semibold text-on-lime disabled:opacity-40"
+        >
+          {busy ? <Loader2 className="size-4 animate-spin" /> : "Save split"}
+        </button>
+      </div>
     </div>
   );
 }

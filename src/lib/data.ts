@@ -468,9 +468,10 @@ export async function getQuickAddOptions() {
   const payFrom = accounts.filter((a) => a.account_group === "debt_card" || a.key.includes("chequing"));
   const uses = new Map<string, number>();
   for (const r of recent) uses.set(r.category_id!, (uses.get(r.category_id!) ?? 0) + 1);
+  const archived = new Set(ok(await db.from("categories").select("id").eq("archived", true)).map((c) => c.id));
   const pick = (kind: CategoryInfo["kind"]) =>
     [...cats.values()]
-      .filter((c) => c.kind === kind && c.parentName) // subcategories only
+      .filter((c) => c.kind === kind && c.parentName && !archived.has(c.id)) // active subcategories only
       .map((c) => ({ id: c.id, name: c.name, parent: c.parentName, icon: c.icon, color: c.color, uses: uses.get(c.id) ?? 0 }))
       .sort((a, b) => b.uses - a.uses || a.name.localeCompare(b.name));
   const lastAccountId = prof?.last_account_id && payFrom.some((a) => a.id === prof.last_account_id) ? prof.last_account_id : null;
@@ -608,7 +609,7 @@ export type ActivityRow = {
   isTransfer: boolean;
   category: Pick<CategoryInfo, "id" | "name" | "parentName" | "icon" | "color" | "kind"> | null;
   /** Category names when the transaction is split. */
-  splits: { name: string; amount_cents: number }[];
+  splits: { name: string; amount_cents: number; categoryId: string | null }[];
   accountId: string;
   /** Part of this transaction friends owe you. */
   owed: { id: string; person: string; amount_cents: number; settled: boolean }[];
@@ -654,7 +655,11 @@ export async function activityData(month?: MonthKey) {
       source: r.source,
       isTransfer: r.is_transfer || c?.kind === "transfer",
       category: c ? { id: c.id, name: c.name, parentName: c.parentName, icon: c.icon, color: c.color, kind: c.kind } : null,
-      splits: r.transaction_splits.map((s) => ({ name: (s.category_id && cats.get(s.category_id)?.name) || "Uncategorized", amount_cents: Number(s.amount_cents) })),
+      splits: r.transaction_splits.map((s) => ({
+        name: (s.category_id && cats.get(s.category_id)?.name) || "Uncategorized",
+        amount_cents: Number(s.amount_cents),
+        categoryId: s.category_id,
+      })),
       accountId: r.account_id,
       owed: r.shared_debts.map((o) => ({ id: o.id, person: o.person, amount_cents: Number(o.amount_cents), settled: !!o.settled_at })),
     };
@@ -672,7 +677,8 @@ export async function getEditOptions() {
     db.from("accounts").select("id,key,name,account_group,last4,sort_order").in("account_group", SPEND_GROUPS).eq("archived", false).order("sort_order").then(ok),
     categories(db),
   ]);
-  const subs = [...cats.values()].filter((c) => c.parentName);
+  const archived = new Set(ok(await db.from("categories").select("id").eq("archived", true)).map((c) => c.id));
+  const subs = [...cats.values()].filter((c) => c.parentName && !archived.has(c.id));
   const order: CategoryInfo["kind"][] = ["expense", "income", "transfer", "reimbursement", "adjustment"];
   return {
     accounts: accounts.filter((a) => a.account_group === "debt_card" || a.key.includes("chequing")).map((a) => ({ id: a.id, name: a.name, last4: a.last4 })),
@@ -766,18 +772,30 @@ export async function previewStatement(bytes: Uint8Array, fileName: string) {
   );
   const byKey = new Map([...cats.values()].map((c) => [c.key, c.id]));
   const byId = new Map(existing.map((e) => [e.id, e]));
+  // Owner rules ("always put X in Y") win over the built-in suggestions.
+  const { merchantKey } = await import("./recurring");
+  const rules = await userRules(db);
+  const ruleFor = (desc: string) => {
+    const k = merchantKey(desc);
+    for (const r of rules) {
+      if (r.match_field === "merchant" && r.pattern === k) return r.category_id;
+      if (r.match_field === "description" && desc.toLowerCase().includes(r.pattern.toLowerCase())) return r.category_id;
+    }
+    return null;
+  };
 
   const rows: ImportPreviewRow[] = parsed.rows.map((r, i) => {
     const m = matches[i];
     const hit = m.existingId ? byId.get(m.existingId) : undefined;
-    const key = suggestCategory(r.description, r.amount_cents);
+    const ruled = ruleFor(r.description);
+    const key = ruled ? null : suggestCategory(r.description, r.amount_cents);
     return {
       ...r,
       merchant: cleanMerchant(r.description),
       fingerprint: prints[i],
       status: taken.has(prints[i]) ? "imported" : m.status,
       match: hit ? { date: hit.date as ISODate, amount_cents: Number(hit.amount_cents), description: hit.description, note: hit.note } : null,
-      categoryId: key ? (byKey.get(key) ?? null) : null,
+      categoryId: ruled ?? (key ? (byKey.get(key) ?? null) : null),
     };
   });
 
@@ -1241,4 +1259,122 @@ export async function addInvestmentAccount(input: { name: string; institution?: 
 export async function archiveInvestmentAccount(id: string) {
   const { db } = await authed();
   ok(await db.from("accounts").update({ archived: true }).eq("id", id).eq("account_group", "investment").select("id"));
+}
+
+// ───────────────────────────── rules, categories, splits (§5, §6) ─────────────────────────────
+
+/** Owner rules: cleaned-merchant → category. Checked before the built-in suggestions. */
+async function userRules(db: Db) {
+  return ok(await db.from("rules").select("id,pattern,match_field,match_type,category_id,priority").eq("enabled", true).order("priority"));
+}
+
+export async function ruleCategoryFor(db: Db, description: string): Promise<string | null> {
+  const { merchantKey } = await import("./recurring");
+  const key = merchantKey(description);
+  for (const r of await userRules(db)) {
+    if (r.match_field === "merchant" && r.match_type === "equals" && r.pattern === key) return r.category_id;
+    if (r.match_field === "description" && r.match_type === "contains" && description.toLowerCase().includes(r.pattern.toLowerCase())) return r.category_id;
+  }
+  return null;
+}
+
+/** "Always put <merchant> in <category>". Optionally re-categorizes past matching transactions. Returns how many were updated. */
+export async function createMerchantRule(description: string, categoryId: string, applyToPast: boolean) {
+  const { db } = await authed();
+  const { merchantKey } = await import("./recurring");
+  const key = merchantKey(description);
+  if (!key) throw new Error("Can't make a rule for this one.");
+  const cat = okMaybe(await db.from("categories").select("id,kind").eq("id", categoryId).maybeSingle());
+  if (!cat) throw new Error("Category not found.");
+  ok(await db.from("rules").delete().eq("match_field", "merchant").eq("pattern", key).select("id"));
+  ok(await db.from("rules").insert({ match_field: "merchant", match_type: "equals", pattern: key, category_id: cat.id, priority: 10 }).select("id"));
+  if (!applyToPast) return 0;
+  const rows = ok(await db.from("transactions").select("id,description,category_id,transaction_splits(id)").limit(5000));
+  const ids = rows.filter((r) => !r.transaction_splits.length && r.category_id !== cat.id && merchantKey(r.description) === key).map((r) => r.id);
+  for (let i = 0; i < ids.length; i += 200) {
+    ok(await db.from("transactions").update({ category_id: cat.id, is_transfer: cat.kind === "transfer" }).in("id", ids.slice(i, i + 200)).select("id"));
+  }
+  return ids.length;
+}
+
+export async function listRulesAndCategories() {
+  const { db } = await authed();
+  const [rules, cats, all] = await Promise.all([
+    db.from("rules").select("id,pattern,match_field,category_id,created_at").order("created_at", { ascending: false }).then(ok),
+    db.from("categories").select("id,key,name,kind,essential,parent_id,archived,icon,color,sort_order").order("sort_order").then(ok),
+    db.from("transactions").select("category_id").not("category_id", "is", null).limit(5000).then(ok),
+  ]);
+  const uses = new Map<string, number>();
+  for (const t of all) uses.set(t.category_id!, (uses.get(t.category_id!) ?? 0) + 1);
+  const parents = cats.filter((c) => !c.parent_id);
+  return {
+    rules: rules.map((r) => ({ id: r.id, merchant: r.pattern, category: cats.find((c) => c.id === r.category_id)?.name ?? "—" })),
+    groups: parents.map((p) => ({
+      id: p.id,
+      name: p.name,
+      kind: p.kind,
+      icon: p.icon,
+      color: p.color,
+      children: cats
+        .filter((c) => c.parent_id === p.id)
+        .map((c) => ({ id: c.id, name: c.name, essential: c.essential, archived: c.archived, icon: c.icon, color: c.color, uses: uses.get(c.id) ?? 0 })),
+    })),
+  };
+}
+
+export async function deleteRule(id: string) {
+  const { db } = await authed();
+  ok(await db.from("rules").delete().eq("id", id).select("id"));
+}
+
+export async function renameCategory(id: string, name: string) {
+  const { db } = await authed();
+  const n = name.trim().slice(0, 50);
+  if (!n) throw new Error("Enter a name.");
+  ok(await db.from("categories").update({ name: n }).eq("id", id).select("id"));
+}
+
+export async function setCategoryArchived(id: string, archived: boolean) {
+  const { db } = await authed();
+  ok(await db.from("categories").update({ archived }).eq("id", id).not("parent_id", "is", null).select("id"));
+}
+
+/** New subcategory under a parent (inherits its kind and color). */
+export async function addCategory(parentId: string, name: string, essential: "fixed" | "variable" | null) {
+  const { db } = await authed();
+  const n = name.trim().slice(0, 50);
+  if (!n) throw new Error("Enter a name.");
+  const parent = okMaybe(await db.from("categories").select("id,kind,color,icon").eq("id", parentId).is("parent_id", null).maybeSingle());
+  if (!parent) throw new Error("Pick a group.");
+  const key = `c_${n.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30)}_${Date.now().toString(36)}`;
+  ok(
+    await db
+      .from("categories")
+      .insert({ key, name: n, parent_id: parent.id, kind: parent.kind, essential: parent.kind === "expense" ? essential : null, color: parent.color, icon: parent.icon, sort_order: 500 })
+      .select("id"),
+  );
+}
+
+/** Split a transaction across categories. Line amounts are positive and must add up to the total. */
+export async function saveSplits(transactionId: string, lines: { categoryId: string; cents: number }[]) {
+  const { db } = await authed();
+  const tx = okMaybe(await db.from("transactions").select("id,amount_cents").eq("id", transactionId).maybeSingle());
+  if (!tx) throw new Error("Transaction not found.");
+  const total = Math.abs(Number(tx.amount_cents));
+  const clean = lines.filter((l) => l.cents > 0);
+  if (clean.length < 2) throw new Error("A split needs at least two lines.");
+  if (clean.some((l) => !Number.isInteger(l.cents) || !l.categoryId)) throw new Error("Each line needs a category and an amount.");
+  const sum = clean.reduce((t, l) => t + l.cents, 0);
+  if (sum !== total) throw new Error(`Lines add up to ${(sum / 100).toFixed(2)}, not ${(total / 100).toFixed(2)}.`);
+  const sign = Number(tx.amount_cents) < 0 ? -1 : 1;
+  ok(await db.from("transaction_splits").delete().eq("transaction_id", tx.id).select("id"));
+  ok(await db.from("transaction_splits").insert(clean.map((l) => ({ transaction_id: tx.id, category_id: l.categoryId, amount_cents: sign * l.cents }))).select("id"));
+  ok(await db.from("transactions").update({ category_id: null }).eq("id", tx.id).select("id"));
+}
+
+/** Undo a split: back to one category. */
+export async function removeSplits(transactionId: string, categoryId: string | null) {
+  const { db } = await authed();
+  ok(await db.from("transaction_splits").delete().eq("transaction_id", transactionId).select("id"));
+  ok(await db.from("transactions").update({ category_id: categoryId }).eq("id", transactionId).select("id"));
 }

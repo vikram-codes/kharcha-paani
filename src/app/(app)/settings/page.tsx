@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CalendarClock, ChartPie, ChevronRight, CreditCard, FileUp, LogOut, ShieldCheck, Target, TrendingUp, Wallet } from "lucide-react";
+import { CalendarClock, ChartPie, ChevronRight, CreditCard, FileUp, LogOut, ShieldCheck, Tags, Target, TrendingUp, Wallet } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
 import { ChangePinForm } from "@/components/change-pin-form";
 
@@ -14,6 +14,7 @@ const MORE = [
   { href: "/cash", label: "Cash", hint: "Bank accounts, emergency fund, owed to you", icon: Wallet },
   { href: "/debts", label: "Debts", hint: "Cards, Affirm, student loan", icon: CreditCard },
   { href: "/investments", label: "Investments", hint: "Accounts and values you update", icon: TrendingUp },
+  { href: "/settings/categories", label: "Categories & rules", hint: "Rename, add, archive; \"always\" rules", icon: Tags },
   { href: "/imports", label: "Import a statement", hint: "PDF from Scotiabank, CIBC or Triangle", icon: FileUp },
 ];
 

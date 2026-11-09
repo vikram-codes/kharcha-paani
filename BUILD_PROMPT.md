@@ -181,6 +181,8 @@ Ongoing importers still need to handle CSV downloads from each bank. When the fi
 - When the owner corrects a category, offer "Always categorize *Tim Hortons* as Coffee?" and create the rule.
 - A rules management screen (desktop), where rules can be reordered by priority.
 
+**Built Nov 8, 2026 (phase B):** changing a transaction's category offers "Always put <merchant> in this category" (+ "also change past ones"): saved as a `rules` row on the cleaned merchant; statement imports apply owner rules before the built-in suggestions. Settings → Categories & rules: list/delete rules, rename / add (under a group, with essential type) / archive categories (archived ones leave pickers, keep history). Transaction edit sheet → Split: lines with category + amount; typing a line rebalances the first line so it always adds up; Remove split goes back to one category.
+
 ### 5.3 Merchants
 - Clean raw descriptors: `SQ *TIM HORTONS #1234 TORONTO ON` → `Tim Hortons`. The owner can rename a merchant, and the new name applies everywhere.
 
