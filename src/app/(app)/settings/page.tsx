@@ -1,9 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CalendarClock, ChartPie, ChevronRight, CreditCard, FileUp, LogOut, ShieldCheck, Tags, Target, TrendingUp, Wallet } from "lucide-react";
+import { Bot, CalendarClock, ChartPie, ChevronRight, CreditCard, FileUp, LogOut, ShieldCheck, Tags, Target, TrendingUp, Wallet } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
 import { ChangePinForm } from "@/components/change-pin-form";
-import { ConnectClaude } from "@/components/connect-claude";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -15,6 +14,7 @@ const MORE = [
   { href: "/cash", label: "Cash", hint: "Bank accounts, emergency fund, owed to you", icon: Wallet },
   { href: "/debts", label: "Debts", hint: "Cards, Affirm, student loan", icon: CreditCard },
   { href: "/investments", label: "Investments", hint: "Accounts and values you update", icon: TrendingUp },
+  { href: "/settings/claude", label: "Connect Claude", hint: "Connector link for your Claude app", icon: Bot },
   { href: "/settings/categories", label: "Categories & rules", hint: "Rename, add, archive; \"always\" rules", icon: Tags },
   { href: "/imports", label: "Import a statement", hint: "PDF from Scotiabank, CIBC or Triangle", icon: FileUp },
 ];
@@ -36,8 +36,6 @@ export default function SettingsPage() {
         </div>
         <ChangePinForm />
       </section>
-
-      <ConnectClaude />
 
       <nav aria-label="More" className="divide-y divide-border rounded-2xl bg-surface-1 px-4">
         {MORE.map(({ href, label, hint, icon: Icon }) => (
