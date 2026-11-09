@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { Landmark, Lock, LockOpen, ShieldCheck } from "lucide-react";
 import { AnimatedCents } from "@/components/animated-number";
 import { BackButton } from "@/components/back-button";
@@ -40,7 +41,8 @@ export function CashOverview({
         <h2 className="mb-2 px-1 text-sm font-medium text-muted-foreground">Bank accounts</h2>
         <div className="divide-y divide-border rounded-2xl bg-surface-1 px-4">
           {bank.map((b) => (
-            <div key={b.id} className="flex items-center gap-3 py-3.5">
+            <div key={b.id} className="relative flex items-center gap-3 py-3.5">
+              <Link href={`/accounts/${b.id}`} className="absolute inset-0" aria-label={`${b.name}: recent entries`} />
               <span className="grid size-10 place-items-center rounded-xl bg-surface-2 text-lime-ink">
                 <Landmark className="size-[18px]" />
               </span>
@@ -57,7 +59,7 @@ export function CashOverview({
                 current={b.cents}
                 debt={false}
                 trigger={
-                  <button type="button" className="flex flex-col items-end" aria-label={`Update ${b.name} balance`}>
+                  <button type="button" className="relative z-10 flex flex-col items-end" aria-label={`Update ${b.name} balance`}>
                     <AnimatedCents value={b.cents} className="num text-base font-semibold" />
                     <span className="text-[11px] text-lime-ink">Update</span>
                   </button>

@@ -35,3 +35,8 @@ export async function removeTransaction(id: string): Promise<Result> {
     return fail(e);
   }
 }
+
+export async function loadAccount(id: string) {
+  const { getAccountDetail } = await import("@/lib/data");
+  return getAccountDetail(id);
+}

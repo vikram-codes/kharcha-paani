@@ -39,7 +39,8 @@ async function Debts() {
           {d.cards.map((c) => {
             const used = c.limit ? Math.round((c.owed / c.limit) * 100) : null;
             return (
-              <div key={c.account_id} className="rounded-2xl bg-surface-1 p-4">
+              <div key={c.account_id} className="relative rounded-2xl bg-surface-1 p-4 transition-colors duration-(--duration-fast) hover:bg-surface-2">
+                <Link href={`/accounts/${c.account_id}`} className="absolute inset-0 rounded-2xl" aria-label={`${c.name}: recent entries`} />
                 <div className="flex items-center gap-3">
                   <span className="grid size-10 place-items-center rounded-xl bg-surface-2 text-lime-ink">
                     <CreditCard className="size-[18px]" />
@@ -57,7 +58,7 @@ async function Debts() {
                     current={c.owed}
                     debt
                     trigger={
-                      <button type="button" className="flex flex-col items-end" aria-label={`Update ${c.name} balance`}>
+                      <button type="button" className="relative z-10 flex flex-col items-end" aria-label={`Update ${c.name} balance`}>
                         <span className="num text-lg font-semibold">{formatCents(c.owed)}</span>
                         <span className="text-[11px] text-lime-ink">Update</span>
                       </button>
@@ -98,7 +99,8 @@ async function Debts() {
           <h2 className="mb-2 px-1 text-sm font-medium text-muted-foreground">Pay-later plans</h2>
           <div className="divide-y divide-border rounded-2xl bg-surface-1 px-4">
             {d.plans.map((p) => (
-              <div key={p.account_id} className="flex items-center gap-3 py-3">
+              <div key={p.account_id} className="relative flex items-center gap-3 py-3">
+                <Link href={`/accounts/${p.account_id}`} className="absolute inset-0" aria-label={`${p.name}: recent entries`} />
                 <span className="grid size-10 place-items-center rounded-xl bg-surface-2 text-lime-ink">
                   <CalendarClock className="size-[18px]" />
                 </span>
@@ -109,7 +111,7 @@ async function Debts() {
                   current={p.owed}
                   debt
                   trigger={
-                    <button type="button" className="flex flex-col items-end" aria-label={`Update ${p.name} balance`}>
+                    <button type="button" className="relative z-10 flex flex-col items-end" aria-label={`Update ${p.name} balance`}>
                       <span className="num text-sm font-semibold">{p.owed === 0 ? "Paid off" : formatCents(p.owed)}</span>
                       <span className="text-[11px] text-lime-ink">Update</span>
                     </button>

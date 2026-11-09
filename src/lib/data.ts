@@ -684,27 +684,17 @@ export async function getActivity(month?: MonthKey) {
 }
 
 /** Same, without connection() so a Server Action can call it (month switching). */
-export async function activityData(month?: MonthKey) {
-  const { db, today } = await authed();
-  const m = month ?? monthKey(today);
-  const { start, end } = monthRange(m);
-  const cats = await categories(db);
-  const [rows, bills] = await Promise.all([
-    db
-      .from("transactions")
-      .select(
-        "id,date,description,note,amount_cents,is_transfer,in_reports,source,category_id,account_id,account:accounts!transactions_account_id_fkey(name,account_group),transaction_splits(category_id,amount_cents),shared_debts!shared_debts_transaction_id_fkey(id,person,amount_cents,settled_at)",
-      )
-      .gte("date", start)
-      .lte("date", end)
-      .eq("in_reports", true)
-      .order("date", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(1000)
-      .then(ok),
-    m === monthKey(today) ? upcoming(db, today, cats) : Promise.resolve([]),
-  ]);
-  const list: ActivityRow[] = rows.map((r) => {
+const ACTIVITY_SELECT =
+  "id,date,description,note,amount_cents,is_transfer,in_reports,source,category_id,account_id,account:accounts!transactions_account_id_fkey(name,account_group),transaction_splits(category_id,amount_cents),shared_debts!shared_debts_transaction_id_fkey(id,person,amount_cents,settled_at)";
+
+function activityQuery(db: Db) {
+  return db.from("transactions").select(ACTIVITY_SELECT).eq("in_reports", true).order("date", { ascending: false }).order("created_at", { ascending: false });
+}
+
+type ActivityDbRow = Awaited<ReturnType<typeof activityQuery>>["data"] extends (infer R)[] | null ? R : never;
+
+function toActivityRows(rows: ActivityDbRow[], cats: Map<string, CategoryInfo>): ActivityRow[] {
+  return rows.map((r) => {
     const c = r.category_id ? cats.get(r.category_id) : undefined;
     return {
       id: r.id,
@@ -726,7 +716,53 @@ export async function activityData(month?: MonthKey) {
       owed: r.shared_debts.map((o) => ({ id: o.id, person: o.person, amount_cents: Number(o.amount_cents), settled: !!o.settled_at })),
     };
   });
-  return { month: m, today, current: monthKey(today), rows: list, upcoming: bills };
+}
+
+export async function activityData(month?: MonthKey) {
+  const { db, today } = await authed();
+  const m = month ?? monthKey(today);
+  const { start, end } = monthRange(m);
+  const cats = await categories(db);
+  const [rows, bills] = await Promise.all([
+    activityQuery(db).gte("date", start).lte("date", end).limit(1000).then(ok),
+    m === monthKey(today) ? upcoming(db, today, cats) : Promise.resolve([]),
+  ]);
+  return { month: m, today, current: monthKey(today), rows: toActivityRows(rows, cats), upcoming: bills };
+}
+
+/** One account's page: balance, card details and its recent entries (newest first). */
+export async function getAccountDetail(id: string, limit = 80) {
+  const { db, today } = await authed();
+  const acct = okMaybe(
+    await db.from("accounts").select("id,key,name,institution,last4,account_group,credit_limit_cents,apr,reported_balance_cents,reported_on,archived").eq("id", id).maybeSingle(),
+  );
+  // The emergency fund stays behind its PIN; legacy history accounts have no balance.
+  if (!acct || acct.account_group === "cash_emergency" || acct.account_group === "legacy") return null;
+  const cats = await categories(db);
+  const [bal, rows] = await Promise.all([
+    db.from("account_balances").select("balance_cents,anchor_date").eq("account_id", id).maybeSingle().then(okMaybe),
+    activityQuery(db).eq("account_id", id).limit(limit).then(ok),
+  ]);
+  const debt = acct.account_group.startsWith("debt_");
+  const balance = Number(bal?.balance_cents ?? 0);
+  const owed = debt ? -balance : null;
+  const reported = acct.reported_balance_cents != null ? -Number(acct.reported_balance_cents) : null;
+  return {
+    today,
+    id: acct.id,
+    name: acct.name,
+    institution: acct.institution,
+    last4: acct.last4,
+    group: acct.account_group,
+    debt,
+    balance,
+    owed,
+    limit: acct.credit_limit_cents != null ? Number(acct.credit_limit_cents) : null,
+    apr: acct.apr != null ? Number(acct.apr) : null,
+    stillToAdd: debt && reported != null && owed != null && reported - owed > 50 ? { cents: reported - owed, on: acct.reported_on as ISODate } : null,
+    since: (bal?.anchor_date as ISODate | null) ?? null,
+    rows: toActivityRows(rows, cats),
+  };
 }
 
 /** First month the transaction list goes back to (Money Pro history starts here). */
