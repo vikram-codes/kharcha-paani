@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, PiggyBank } from "lucide-react";
 import { toast } from "sonner";
+import { notifyDataChanged } from "@/lib/data-events";
 import { dismissAction, moveToSavingsAction } from "@/app/actions/planning";
 import { MoneyInput, centsToInput, toCents } from "@/components/money-input";
 import { formatDay, formatMonthName } from "@/lib/dates";
@@ -30,6 +31,7 @@ export function SavingsPromptCard({ prompt }: { prompt: SavingsPrompt }) {
       const res = await fn();
       if (!res.ok) return void toast.error(res.error ?? "Something went wrong.");
       toast.success(msg);
+      notifyDataChanged();
       router.refresh();
     });
 

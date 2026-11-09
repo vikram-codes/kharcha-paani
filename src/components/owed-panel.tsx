@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, HandCoins, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { notifyDataChanged } from "@/lib/data-events";
 import { addOwedAction, deleteOwedAction, loadOwed, settleOwedAction, unsettleOwedAction } from "@/app/actions/editing";
 import { MoneyInput, toCents } from "@/components/money-input";
 import { formatShort } from "@/lib/dates";
@@ -35,6 +36,7 @@ export function OwedPanel() {
       if (!res.ok) return void toast.error(res.error ?? "Something went wrong.");
       toast.success(msg);
       await reload();
+      notifyDataChanged();
       router.refresh();
     });
 

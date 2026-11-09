@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { ArrowDownRight, ArrowUpRight, ChevronLeft, ChevronRight, History } from "lucide-react";
 import { loadSummary, type SummaryPayload } from "@/app/actions/summary";
+import { onDataChanged } from "@/lib/data-events";
 import { AnimatedCents } from "@/components/animated-number";
 import { CategoryBreakdown, type BreakdownRow } from "@/components/category-breakdown";
 import { MonthPicker } from "@/components/month-picker";
@@ -39,6 +40,10 @@ const keyFromPath = (path: string) => path.split("/")[2] ?? "";
 export function SummaryPager({ initial, current }: { initial: SummaryPayload; current: string }) {
   const pathname = usePathname();
   const urlKey = keyFromPath(pathname) || initial.key;
+  const urlKeyRef = useRef(urlKey);
+  useEffect(() => {
+    urlKeyRef.current = urlKey;
+  }, [urlKey]);
   const cache = useRef(new Map<string, SummaryPayload>([[initial.key, initial]]));
   const inflight = useRef(new Map<string, Promise<SummaryPayload>>());
   const [shown, setShown] = useState<SummaryPayload>(initial);
@@ -71,6 +76,20 @@ export function SummaryPager({ initial, current }: { initial: SummaryPayload; cu
       live = false;
     };
   }, [urlKey, shown.key]);
+
+  // Anything saved elsewhere → forget cached months and reload the one on screen.
+  useEffect(
+    () =>
+      onDataChanged(() => {
+        cache.current.clear();
+        inflight.current.clear();
+        loadSummary(urlKeyRef.current).then((res) => {
+          cache.current.set(res.key, res);
+          if (res.key === urlKeyRef.current) setShown(res);
+        });
+      }),
+    [],
+  );
 
   // Warm the neighbours once a month is on screen.
   useEffect(() => {

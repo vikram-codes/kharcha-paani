@@ -4,6 +4,7 @@ import { useState, useTransition, type ReactElement } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { notifyDataChanged } from "@/lib/data-events";
 import { updateBalance } from "@/app/actions/editing";
 import { MoneyInput, centsToInput, toCents } from "@/components/money-input";
 import { ResponsiveSheetContent } from "@/components/ui/responsive-sheet";
@@ -45,6 +46,7 @@ export function UpdateBalance({
       toast.success(`${name}: ${formatCents(cents)}${debt ? " owed" : ""}`);
       setOpen(false);
       onSaved?.();
+      notifyDataChanged();
       router.refresh();
     });
 

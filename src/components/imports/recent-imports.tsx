@@ -3,6 +3,7 @@
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { notifyDataChanged } from "@/lib/data-events";
 import { undoImportAction } from "@/app/actions/imports";
 
 type Imp = { id: string; file_name: string | null; imported_count: number; skipped_count: number; status: string; created_at: string };
@@ -32,6 +33,7 @@ export function RecentImports({ imports }: { imports: Imp[] }) {
                     const res = await undoImportAction(i.id);
                     if (!res.ok) return void toast.error(res.error);
                     toast.success("Import undone");
+                    notifyDataChanged();
                     router.refresh();
                   })
                 }

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { ArrowLeftRight, ChevronLeft, ChevronRight, Search, Split } from "lucide-react";
 import { loadActivity } from "@/app/actions/activity";
+import { onDataChanged } from "@/lib/data-events";
 import { CategoryChip } from "@/components/category-icon";
 import type { ActivityRow, Upcoming } from "@/lib/data";
 import { formatDay, formatMonth, formatShort, shiftMonth } from "@/lib/dates";
@@ -66,6 +67,9 @@ export function TransactionsView({ initial, firstMonth }: { initial: Activity; f
     cache.current.clear();
     setReload((n) => n + 1);
   };
+
+  // Anything saved elsewhere (quick-add, imports, Claude via refresh) → reload this month.
+  useEffect(() => onDataChanged(refresh), []);
 
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase();

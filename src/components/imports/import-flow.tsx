@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { AlertTriangle, Check, CheckCircle2, FileUp, Loader2, X } from "lucide-react";
 import { toast } from "sonner";
+import { notifyDataChanged } from "@/lib/data-events";
 import { confirmImport, previewImport } from "@/app/actions/imports";
 import { formatShort } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
@@ -99,6 +100,7 @@ export function ImportFlow() {
       if (!res.ok) return void toast.error(res.error);
       toast.success(`Imported ${res.imported} transactions into ${p.account.name}`);
       reset();
+      notifyDataChanged();
       router.refresh();
     });
 

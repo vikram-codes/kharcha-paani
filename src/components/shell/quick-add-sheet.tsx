@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Delete, Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import { notifyDataChanged } from "@/lib/data-events";
 import {
   addTransaction,
   addTransfer,
@@ -143,6 +144,7 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
         setAmount("");
         setNote("");
         setOpen(false);
+        notifyDataChanged();
       });
       return;
     }
@@ -167,6 +169,7 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
       setCategoryId(null);
       setNote("");
       setOpen(false);
+      notifyDataChanged();
     });
   }, [
     canSave,
