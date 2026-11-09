@@ -59,7 +59,16 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
 
   const onOpenChange = (next: boolean) => {
     setOpen(next);
-    if (next) load(); // fresh "last used" account + frequent categories each time
+    if (next) {
+      // Closing without saving discards the entry; each open starts clean.
+      setAmount("");
+      setCategoryId(null);
+      setNote("");
+      setShowAll(false);
+      setDate("");
+      setAccountId("");
+      load(); // fresh "last used" account + frequent categories each time
+    }
   };
 
   // "12." is a valid in-progress entry: drop the trailing dot before parsing.

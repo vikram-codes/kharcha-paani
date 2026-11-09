@@ -24,6 +24,16 @@ export function BudgetEditor({ month, total, lines }: { month: string; total: nu
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(lines.map((l) => [l.id, centsToInput(l.budget)])));
   const [saving, startSaving] = useTransition();
 
+  // Unsaved edits are thrown away: every time the sheet opens it starts from the saved budget.
+  const onOpenChange = (next: boolean) => {
+    if (next) {
+      setScope("default");
+      setTotalIn(total != null ? centsToInput(total) : "");
+      setValues(Object.fromEntries(lines.map((l) => [l.id, centsToInput(l.budget)])));
+    }
+    setOpen(next);
+  };
+
   const parsed = lines.map((l) => ({ id: l.id, cents: toCents(values[l.id] ?? "") }));
   const linesTotal = parsed.reduce((t, l) => t + (l.cents ?? 0), 0);
   const totalCents = toCents(totalIn);
@@ -57,7 +67,7 @@ export function BudgetEditor({ month, total, lines }: { month: string; total: nu
   );
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetTrigger
         render={
           <button type="button" className="flex items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
