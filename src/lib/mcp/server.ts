@@ -21,6 +21,7 @@ import {
 import { isMonthKey } from "@/lib/dates";
 import { cleanMerchant } from "@/lib/merchant";
 import { HISTORY } from "@/lib/periods";
+import { registerChangeTools } from "./change-tools";
 
 /**
  * Kharcha-Paani tools for Claude (§7.11). Reads go through the same data layer
@@ -30,7 +31,7 @@ import { HISTORY } from "@/lib/periods";
 export const INSTRUCTIONS = `Kharcha-Paani is the owner's personal finance app (Canadian dollars, Toronto time).
 Money model: Cash = bank accounts (the emergency fund is private and never shown here). Debts = credit cards + Affirm; the student loan (India, 9.5%) is separate. Card purchases count as spending when made and raise that card's debt; card payments are transfers, not spending.
 Budget: a monthly headline budget plus fixed and variable lines. "Spent" excludes transfers, friend paybacks and balance adjustments.
-Writing: NEVER save without the owner's explicit yes. Always call draft_transactions (purchases/income) or draft_transfer (card payments, chequing↔savings) first, show the preview lines to the owner, and call confirm_draft only after they clearly agree in this conversation. If the draft reports problems (unclear category/account), ask the owner instead of guessing.
+Writing (full access: add, edit, move, delete, split, balances, owed money, bills, budget, rules, goals, investments): NEVER save without the owner's explicit yes. Always call the matching draft_* tool first (draft_transactions for new purchases/income, draft_transfer for card payments, draft_edit_transaction / draft_delete_transactions with ids from list_transactions, etc.), show the preview lines to the owner, and call confirm_draft only after they clearly agree in this conversation. If the draft reports problems (unclear category/account), ask the owner instead of guessing.
 Amounts in tool results are dollars. Expenses are negative in transaction lists.`;
 
 const $ = (c: number) => Math.round(c) / 100;
@@ -40,6 +41,8 @@ const READ = { readOnlyHint: true, openWorldHint: false } as const;
 const monthArg = z.string().regex(/^\d{4}-\d{2}$/).optional().describe("Month as YYYY-MM. Defaults to the current month.");
 
 export function registerTools(server: McpServer) {
+  registerChangeTools(server);
+
   server.registerTool(
     "get_overview",
     {
@@ -130,6 +133,7 @@ export function registerTools(server: McpServer) {
         const q = search?.trim().toLowerCase();
         const rows = a.rows
           .map((r) => ({
+            id: r.id,
             date: r.date,
             merchant: r.note && r.source === "manual" ? r.note : cleanMerchant(r.description),
             amount: $(r.amount_cents),

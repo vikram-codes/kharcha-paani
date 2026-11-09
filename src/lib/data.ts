@@ -1573,6 +1573,11 @@ export async function confirmDraft(id: string) {
   // Claim it first, so a double confirm can't save twice.
   const claimed = ok(await db.from("mcp_drafts").update({ confirmed_at: new Date().toISOString() }).eq("id", id).is("confirmed_at", null).select("id"));
   if (!claimed.length) throw new Error("This draft was already saved.");
+  const change = (d.payload as unknown as { change?: unknown }).change;
+  if (change) {
+    const { applyChange } = await import("./mcp/changes");
+    return [await applyChange(change)];
+  }
   const transfer = (d.payload as unknown as { transfer?: { fromId: string; toId: string; cents: number; date: ISODate; note: string | null; from: string; to: string } }).transfer;
   if (transfer) {
     await createTransfer(transfer);
@@ -1621,4 +1626,45 @@ export async function draftTransfer(input: { from?: string; to: string; amount: 
   const line = dollars(cents) + " · " + fromR.name + " → " + toR.name + " · " + date + " (transfer: not spending)";
   const [draft] = ok(await db.from("mcp_drafts").insert({ payload: { transfer }, summary: line }).select("id"));
   return { ok: true as const, draftId: draft.id, preview: [line] };
+}
+
+/** Store any change for Claude to confirm later (see mcp/changes.ts). Saves nothing else. */
+export async function storeChangeDraft(change: unknown, preview: string[]) {
+  const { db } = await authed();
+  const [draft] = ok(await db.from("mcp_drafts").insert({ payload: { change } as never, summary: preview.join("\n") }).select("id"));
+  return draft.id;
+}
+
+/** One transaction, readable, for "before → after" previews. */
+export async function getTransactionBrief(id: string) {
+  const { db } = await authed();
+  const t = okMaybe(
+    await db
+      .from("transactions")
+      .select("id,date,amount_cents,description,note,category_id,account_id,is_transfer,source,account:accounts!transactions_account_id_fkey(name),category:categories(name),transaction_splits(id)")
+      .eq("id", id)
+      .maybeSingle(),
+  );
+  if (!t) return null;
+  return {
+    id: t.id,
+    date: t.date as ISODate,
+    amount_cents: Number(t.amount_cents),
+    description: t.description,
+    note: t.note,
+    categoryId: t.category_id,
+    category: t.category?.name ?? (t.transaction_splits.length ? "Split" : "Uncategorized"),
+    accountId: t.account_id,
+    account: t.account?.name ?? "",
+    isTransfer: t.is_transfer,
+    split: t.transaction_splits.length > 0,
+  };
+}
+
+/** Accounts Claude may act on (never the private emergency fund). */
+export async function listAccountsForChanges() {
+  const { db } = await authed();
+  return ok(
+    await db.from("accounts").select("id,key,name,account_group").eq("archived", false).not("account_group", "in", "(legacy,cash_emergency)").order("sort_order"),
+  ).map((a) => ({ id: a.id, name: a.name, group: a.account_group, key: a.key }));
 }
