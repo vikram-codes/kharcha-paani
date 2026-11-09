@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Check, HandCoins, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { addOwedAction, deleteOwedAction, loadOwed, settleOwedAction } from "@/app/actions/editing";
+import { addOwedAction, deleteOwedAction, loadOwed, settleOwedAction, unsettleOwedAction } from "@/app/actions/editing";
 import { MoneyInput, toCents } from "@/components/money-input";
 import { formatShort } from "@/lib/dates";
 import { cleanMerchant } from "@/lib/merchant";
@@ -21,6 +21,8 @@ export function OwedPanel() {
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [busy, start] = useTransition();
+  /** Which row is waiting for the second tap ("received" / "remove"). */
+  const [confirm, setConfirm] = useState<{ id: string; what: "received" | "remove" } | null>(null);
 
   const reload = () => loadOwed().then(setData);
   useEffect(() => {
@@ -94,24 +96,64 @@ export function OwedPanel() {
               </span>
             </span>
             <span className="num text-sm text-muted-foreground">{formatCents(o.amount_cents)}</span>
+            {confirm?.id === o.id && confirm.what === "received" ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setConfirm(null);
+                  act(() => settleOwedAction(o.id), `Marked ${formatCents(o.amount_cents)} from ${o.person} as received`);
+                }}
+                className="flex items-center gap-1 rounded-full bg-money-in px-2.5 py-1.5 text-xs font-semibold text-background"
+              >
+                <Check className="size-3" /> Confirm
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setConfirm({ id: o.id, what: "received" })}
+                className="flex items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1.5 text-xs font-medium text-money-in"
+              >
+                <Check className="size-3" /> Mark received
+              </button>
+            )}
             <button
               type="button"
               disabled={busy}
-              onClick={() => act(() => settleOwedAction(o.id), `${o.person} paid you back`)}
-              className="flex items-center gap-1 rounded-full bg-surface-2 px-2.5 py-1.5 text-xs font-medium text-money-in"
+              onClick={() => {
+                if (confirm?.id === o.id && confirm.what === "remove") {
+                  setConfirm(null);
+                  act(() => deleteOwedAction(o.id), "Removed");
+                } else setConfirm({ id: o.id, what: "remove" });
+              }}
+              aria-label={confirm?.id === o.id && confirm.what === "remove" ? "Tap again to remove" : "Remove"}
+              className={confirm?.id === o.id && confirm.what === "remove" ? "text-budget-over" : "text-muted-foreground hover:text-budget-over"}
             >
-              <Check className="size-3" /> Paid back
-            </button>
-            <button type="button" disabled={busy} onClick={() => act(() => deleteOwedAction(o.id), "Removed")} aria-label="Remove" className="text-muted-foreground hover:text-budget-over">
               <Trash2 className="size-4" />
             </button>
           </div>
         ))}
       </div>
       {data && data.settled.length > 0 && (
-        <p className="mt-2 px-1 text-xs text-muted-foreground">
-          Paid back recently: {data.settled.map((s) => `${s.person} ${formatCents(s.amount_cents, { whole: true })}`).join(" · ")}
-        </p>
+        <div className="mt-2 px-1">
+          <p className="mb-1 text-xs text-muted-foreground">Received recently</p>
+          <div className="flex flex-wrap gap-1.5">
+            {data.settled.map((s) => (
+              <span key={s.id} className="flex items-center gap-1.5 rounded-full bg-surface-1 py-1 pr-1 pl-2.5 text-xs text-muted-foreground">
+                {s.person} {formatCents(s.amount_cents, { whole: true })}
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => act(() => unsettleOwedAction(s.id), `${s.person} owes you again`)}
+                  className="rounded-full bg-surface-2 px-2 py-0.5 font-medium text-foreground"
+                >
+                  Undo
+                </button>
+              </span>
+            ))}
+          </div>
+        </div>
       )}
       <p className="mt-1 px-1 text-[11px] text-muted-foreground">Not counted in Cash until it&apos;s paid back. When it arrives as an e-Transfer it&apos;s a payback, not income.</p>
     </section>

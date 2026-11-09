@@ -2,6 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import {
+  addInvestmentAccount,
+  archiveInvestmentAccount,
+  getInvestments,
   deleteBill,
   deleteGoal,
   dismiss,
@@ -41,3 +44,9 @@ export async function loadGoals() {
 }
 export const saveGoalAction = async (g: { id?: string; name: string; targetCents: number; monthlyCents: number; accountId: string | null }) => run(() => saveGoal(g));
 export const deleteGoalAction = async (id: string) => run(() => deleteGoal(id));
+
+export async function loadInvestments() {
+  return getInvestments();
+}
+export const addInvestmentAction = async (i: { name: string; institution?: string; valueCents: number }) => run(() => addInvestmentAccount(i));
+export const archiveInvestmentAction = async (id: string) => run(() => archiveInvestmentAccount(id));

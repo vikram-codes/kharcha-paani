@@ -1,8 +1,7 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
+import { BackButton } from "@/components/back-button";
 import { Ring } from "@/components/ring";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatMonth, formatShort } from "@/lib/dates";
@@ -14,9 +13,7 @@ export const metadata: Metadata = { title: "Student loan" };
 export default function StudentLoanPage() {
   return (
     <div className="mx-auto flex max-w-md flex-col gap-5 md:max-w-xl">
-      <Link href="/debts" className="flex w-fit items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ChevronLeft className="size-4" /> Debts
-      </Link>
+      <BackButton fallback="/debts" label="Debts" />
       <Suspense fallback={<LoanSkeleton />}>
         <Loan />
       </Suspense>

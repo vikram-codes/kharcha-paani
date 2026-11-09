@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { addOwed, deleteOwed, listOwed, reconcileAccount, setBudgetLines, setMonthlyBudget, settleOwed } from "@/lib/data";
+import { addOwed, deleteOwed, listOwed, reconcileAccount, setBudgetLines, setMonthlyBudget, settleOwed, unsettleOwed } from "@/lib/data";
 import { isMonthKey } from "@/lib/dates";
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -43,4 +43,8 @@ export async function settleOwedAction(id: string) {
 
 export async function deleteOwedAction(id: string) {
   return run(() => deleteOwed(id));
+}
+
+export async function unsettleOwedAction(id: string) {
+  return run(() => unsettleOwed(id));
 }

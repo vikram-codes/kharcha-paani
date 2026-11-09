@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronRight, CreditCard, Settings, TrendingUp } from "lucide-react";
+import { ChevronRight, CreditCard, TrendingUp } from "lucide-react";
 import { AnimatedCents } from "@/components/animated-number";
 import { CashCard } from "@/components/cash-card";
 import { CategoryChip } from "@/components/category-icon";
@@ -42,10 +42,6 @@ async function Home() {
             {h.name ? `, ${h.name}` : ""}
           </h1>
         </div>
-        {/* Phones have no sidebar: Settings (PIN, imports, sign out) lives here. */}
-        <Link href="/settings" aria-label="Settings" className="grid size-10 shrink-0 place-items-center rounded-xl bg-surface-1 text-muted-foreground transition-colors duration-(--duration-fast) hover:text-foreground md:hidden">
-          <Settings className="size-5" />
-        </Link>
       </header>
 
       {/* Hero: Cash */}

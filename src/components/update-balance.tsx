@@ -20,6 +20,7 @@ export function UpdateBalance({
   current,
   debt,
   trigger,
+  onSaved,
 }: {
   accountId: string;
   name: string;
@@ -27,6 +28,8 @@ export function UpdateBalance({
   current: number;
   debt: boolean;
   trigger: ReactElement;
+  /** For screens that keep their own copy of the data (e.g. Investments). */
+  onSaved?: () => void;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -41,6 +44,7 @@ export function UpdateBalance({
       if (!res.ok) return void toast.error(res.error);
       toast.success(`${name}: ${formatCents(cents)}${debt ? " owed" : ""}`);
       setOpen(false);
+      onSaved?.();
       router.refresh();
     });
 

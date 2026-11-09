@@ -15,7 +15,7 @@ import {
 
 export type NavItem = { href: string; label: string; icon: LucideIcon };
 
-/** Mobile bottom bar (§9): Home · Activity · (+) · Budgets · Summary. (No in-app chat: Claude connects over MCP.) */
+/** Mobile bottom bar (§9): Home · Activity · (+) · Budgets · Settings. Summary opens from Home; Settings is the hub for everything else. */
 export const mobileTabs: { left: NavItem[]; right: NavItem[] } = {
   left: [
     { href: "/", label: "Home", icon: Home },
@@ -23,7 +23,7 @@ export const mobileTabs: { left: NavItem[]; right: NavItem[] } = {
   ],
   right: [
     { href: "/budgets", label: "Budgets", icon: PiggyBank },
-    { href: "/summary", label: "Summary", icon: ChartPie },
+    { href: "/settings", label: "Settings", icon: Settings },
   ],
 };
 

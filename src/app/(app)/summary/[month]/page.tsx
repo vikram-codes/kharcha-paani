@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { connection } from "next/server";
 import type { SummaryPayload } from "@/app/actions/summary";
+import { BackButton } from "@/components/back-button";
 import { Reveal } from "@/components/reveal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { isMonthKey, monthKey, todayISO } from "@/lib/dates";
@@ -16,7 +17,8 @@ export const metadata: Metadata = { title: "Summary" };
  */
 export default function SummaryPage({ params }: PageProps<"/summary/[month]">) {
   return (
-    <div className="mx-auto max-w-md md:max-w-3xl">
+    <div className="mx-auto flex max-w-md flex-col gap-2 md:max-w-3xl">
+      <BackButton fallback="/" />
       <Reveal fallback={<SummarySkeleton />}>
         <Initial params={params} />
       </Reveal>

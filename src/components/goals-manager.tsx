@@ -5,6 +5,7 @@ import { Loader2, Plus, Target, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { deleteGoalAction, loadGoals, saveGoalAction } from "@/app/actions/planning";
 import { AnimatedCents } from "@/components/animated-number";
+import { BackButton } from "@/components/back-button";
 import { MoneyInput, centsToInput, toCents } from "@/components/money-input";
 import { ThemedSelect } from "@/components/themed-select";
 import { ResponsiveSheetContent } from "@/components/ui/responsive-sheet";
@@ -38,7 +39,8 @@ export function GoalsManager({ initial }: { initial: Data }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <header className="flex items-end justify-between px-1">
+      <BackButton fallback="/settings" />
+      <header className="-mt-3 flex items-end justify-between px-1">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Savings goals</h1>
           <p className="num text-sm text-muted-foreground">{monthlyTotal ? `${formatCents(monthlyTotal)} a month planned` : "Nothing planned yet"}</p>

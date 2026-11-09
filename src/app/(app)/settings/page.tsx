@@ -1,17 +1,19 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CalendarClock, ChevronRight, CreditCard, FileUp, LogOut, ShieldCheck, Target, Wallet } from "lucide-react";
+import { CalendarClock, ChartPie, ChevronRight, CreditCard, FileUp, LogOut, ShieldCheck, Target, TrendingUp, Wallet } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
 import { ChangePinForm } from "@/components/change-pin-form";
 
 export const metadata: Metadata = { title: "Settings" };
 
-// Phones have no sidebar: everything that isn't a tab is reachable from here.
+// Settings is a tab on phones (no sidebar there): everything that isn't a tab is reachable from here.
 const MORE = [
+  { href: "/summary", label: "Monthly summary", hint: "Income vs spending, categories, past months", icon: ChartPie },
   { href: "/bills", label: "Bills", hint: "Upcoming payments, add or stop bills", icon: CalendarClock },
   { href: "/goals", label: "Savings goals", hint: "Targets and monthly amounts", icon: Target },
   { href: "/cash", label: "Cash", hint: "Bank accounts, emergency fund, owed to you", icon: Wallet },
   { href: "/debts", label: "Debts", hint: "Cards, Affirm, student loan", icon: CreditCard },
+  { href: "/investments", label: "Investments", hint: "Accounts and values you update", icon: TrendingUp },
   { href: "/imports", label: "Import a statement", hint: "PDF from Scotiabank, CIBC or Triangle", icon: FileUp },
 ];
 

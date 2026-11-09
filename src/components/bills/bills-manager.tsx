@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Loader2, Plus, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { deleteBillAction, dismissAction, loadBills, saveBillAction, setBillActiveAction } from "@/app/actions/planning";
+import { BackButton } from "@/components/back-button";
 import { CategoryChip } from "@/components/category-icon";
 import { MoneyInput, centsToInput, toCents } from "@/components/money-input";
 import { ThemedSelect } from "@/components/themed-select";
@@ -89,7 +90,8 @@ export function BillsManager({ initial }: { initial: Data }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <header className="flex items-end justify-between px-1">
+      <BackButton fallback="/" />
+      <header className="-mt-3 flex items-end justify-between px-1">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Bills</h1>
           <p className="num text-sm text-muted-foreground">{formatCents(monthlyTotal)} a month in monthly bills</p>

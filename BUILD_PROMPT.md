@@ -92,6 +92,8 @@ The app has three top-level groups. Accounts are grouped by **what the money is*
 - Each update is stored as a dated snapshot, so the value can be charted over time.
 - Contributions from chequing are transfers (Cash → Investments), not spending.
 
+**Built Nov 8, 2026:** `/investments`: add an account (name, where, current value), "Update value" saves a dated snapshot, sparkline + change since first value, remove = archive (history kept). The total feeds the Home tile.
+
 ### 3.4 How money moves (the accounting rules)
 | Event | Spending? | Effect on balances |
 |---|---|---|
@@ -296,7 +298,7 @@ Tapping a tile opens its section:
 
 **Summary navigation (decided Nov 8, 2026).** Every category row (spending and income) expands to show that month's transactions. Month arrows go back to **Jan 2026**; one step further is a single page titled **2024–2025** (Money Pro, Dec 2024 – Dec 2025: totals, monthly averages, categories, income sources, adjustments), and nothing before it. Tapping the month title opens a **month picker** sheet (a 12-month grid per year with each month's spending, plus a 2024–2025 tile). The Summary budget card is display-only. **Adjustments** (Cashew's Jan 1, 2026 starting point +$2,310; Money Pro's Dec 31, 2025 −$1,700 for untracked Nov–Dec 2025) have their own category kind and card, and never count as income or spending. GIC payouts count as income (loan money coming back). **Month switching never blanks the screen** (decided Nov 8, 2026): the current month stays visible (dimmed, with a thin lime progress line) until the next has loaded, then swaps in place; money figures count up or roll to their new values (`AnimatedCents`). Neighbouring months load in the background; the URL stays in sync via `history.pushState`, so back/forward/refresh work. Skeletons appear only on a cold load. No page-wide crossfade between screens. "vs last month" comparisons are hidden for the current month (shown for finished months).
 
-> **Decided Nov 8, 2026: no in-app chat and no in-app summary button.** The owner talks to their finances from their own Claude app (claude.ai / desktop / mobile) through the **MCP server** below, keeping every conversation there. The chat screen, memory screen and "Write my summary" button are dropped; the MCP tools (read + draft→confirm writes) carry that role. The mobile tab bar is Home · Activity · (+) · Budgets · **Summary**; Settings is reached from a gear on Home (phones) or the sidebar.
+> **Decided Nov 8, 2026: no in-app chat and no in-app summary button.** The owner talks to their finances from their own Claude app (claude.ai / desktop / mobile) through the **MCP server** below, keeping every conversation there. The chat screen, memory screen and "Write my summary" button are dropped; the MCP tools (read + draft→confirm writes) carry that role. The mobile tab bar is Home · Activity · (+) · Budgets · **Settings** (updated Nov 8, 2026). Settings is the hub on phones for Summary, Bills, Goals, Cash, Debts, Investments and Imports. Every screen reached from elsewhere has a "‹ Back" link (history back, or a sensible fallback when opened directly).
 
 ### 7.11 Claude chat _(superseded: see note above; MCP section still applies)_: the owner's own finance assistant
 A chat screen where Claude knows the owner's financial context, learns their habits, and **does the data entry**.

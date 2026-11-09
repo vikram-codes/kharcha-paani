@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Landmark, Lock, LockOpen, ShieldCheck } from "lucide-react";
 import { AnimatedCents } from "@/components/animated-number";
+import { BackButton } from "@/components/back-button";
 import { EmergencyPinSheet } from "@/components/emergency-pin";
 import { OwedPanel } from "@/components/owed-panel";
 import { UpdateBalance } from "@/components/update-balance";
@@ -24,7 +25,8 @@ export function CashOverview({
 
   return (
     <div className="flex flex-col gap-5">
-      <header className="px-1">
+      <BackButton fallback="/" />
+      <header className="-mt-3 px-1">
         <p className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
           Cash{revealed != null && <span className="ml-1.5 normal-case tracking-normal text-lime-ink">· incl. emergency</span>}
         </p>

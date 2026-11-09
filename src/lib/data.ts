@@ -1188,3 +1188,55 @@ export async function deleteGoal(id: string) {
   const { db } = await authed();
   ok(await db.from("savings_goals").delete().eq("id", id).select("id"));
 }
+
+/** Undo "received": the money is owed to you again. */
+export async function unsettleOwed(id: string) {
+  const { db } = await authed();
+  ok(await db.from("shared_debts").update({ settled_at: null }).eq("id", id).select("id"));
+}
+
+// ───────────────────────────── investments (§3.3) ─────────────────────────────
+
+export async function getInvestments() {
+  const { db } = await authed();
+  const [accounts, bal] = await Promise.all([
+    db.from("accounts").select("id,name,institution,sort_order").eq("account_group", "investment").eq("archived", false).order("sort_order").then(ok),
+    balances(db),
+  ]);
+  const ids = accounts.map((a) => a.id);
+  const snaps = ids.length
+    ? ok(await db.from("balance_snapshots").select("account_id,as_of,amount_cents").in("account_id", ids).order("as_of").limit(2000))
+    : [];
+  return accounts.map((a) => {
+    const history = snaps.filter((s) => s.account_id === a.id).map((s) => ({ date: s.as_of as ISODate, cents: Number(s.amount_cents) }));
+    return {
+      id: a.id,
+      name: a.name,
+      institution: a.institution,
+      value: bal.find((b) => b.account_id === a.id)?.balance_cents ?? 0,
+      updated: history.length ? history[history.length - 1].date : null,
+      history,
+    };
+  });
+}
+
+export async function addInvestmentAccount(input: { name: string; institution?: string; valueCents: number }) {
+  const { db, today } = await authed();
+  const name = input.name.trim().slice(0, 60);
+  if (!name) throw new Error("Name the account (e.g. TFSA).");
+  if (!Number.isInteger(input.valueCents) || input.valueCents < 0) throw new Error("Enter the current value.");
+  const key = `inv_${name.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 30)}_${Date.now().toString(36)}`;
+  const [acct] = ok(
+    await db
+      .from("accounts")
+      .insert({ key, name, institution: input.institution?.trim().slice(0, 60) || null, account_group: "investment", sort_order: 100 })
+      .select("id"),
+  );
+  ok(await db.from("balance_snapshots").insert({ account_id: acct.id, as_of: today, amount_cents: input.valueCents, kind: "manual", note: "Starting value" }).select("id"));
+}
+
+/** Hide an investment account (its history is kept). */
+export async function archiveInvestmentAccount(id: string) {
+  const { db } = await authed();
+  ok(await db.from("accounts").update({ archived: true }).eq("id", id).eq("account_group", "investment").select("id"));
+}

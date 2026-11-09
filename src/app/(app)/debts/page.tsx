@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { CalendarClock, ChevronRight, CreditCard, GraduationCap } from "lucide-react";
+import { BackButton } from "@/components/back-button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { UpdateBalance } from "@/components/update-balance";
 import { bandColorVar, budgetBand } from "@/lib/budget";
@@ -13,6 +14,7 @@ export const metadata: Metadata = { title: "Debts" };
 export default function DebtsPage() {
   return (
     <div className="mx-auto flex max-w-md flex-col gap-5 md:max-w-3xl">
+      <BackButton fallback="/" className="-mb-3" />
       <Suspense fallback={<DebtsSkeleton />}>
         <Debts />
       </Suspense>
