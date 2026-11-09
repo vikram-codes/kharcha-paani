@@ -102,6 +102,36 @@ export type Database = {
         }
         Relationships: []
       }
+      api_tokens: {
+        Row: {
+          created_at: string
+          id: string
+          last_used_at: string | null
+          name: string
+          revoked_at: string | null
+          token_hash: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          name: string
+          revoked_at?: string | null
+          token_hash: string
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_used_at?: string | null
+          name?: string
+          revoked_at?: string | null
+          token_hash?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       balance_snapshots: {
         Row: {
           account_id: string
@@ -399,6 +429,36 @@ export type Database = {
           holiday_rule?: string
           net_paycheque_cents?: number
           updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      mcp_drafts: {
+        Row: {
+          confirmed_at: string | null
+          created_at: string
+          discarded_at: string | null
+          id: string
+          payload: Json
+          summary: string
+          user_id: string
+        }
+        Insert: {
+          confirmed_at?: string | null
+          created_at?: string
+          discarded_at?: string | null
+          id?: string
+          payload: Json
+          summary: string
+          user_id?: string
+        }
+        Update: {
+          confirmed_at?: string | null
+          created_at?: string
+          discarded_at?: string | null
+          id?: string
+          payload?: Json
+          summary?: string
           user_id?: string
         }
         Relationships: []

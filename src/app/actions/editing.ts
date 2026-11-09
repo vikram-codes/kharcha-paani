@@ -48,3 +48,16 @@ export async function deleteOwedAction(id: string) {
 export async function unsettleOwedAction(id: string) {
   return run(() => unsettleOwed(id));
 }
+
+// ── Claude connector links ──
+import { createConnectorToken, listConnectorTokens, revokeConnectorToken } from "@/lib/data";
+
+export async function createConnectorAction(name: string): Promise<{ ok: true; token: string } | { ok: false; error: string }> {
+  try {
+    return { ok: true, token: await createConnectorToken(name) };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : "Couldn't create the link." };
+  }
+}
+export const listConnectorsAction = async () => listConnectorTokens();
+export const revokeConnectorAction = async (id: string) => run(() => revokeConnectorToken(id));

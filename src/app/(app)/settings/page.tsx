@@ -3,6 +3,7 @@ import Link from "next/link";
 import { CalendarClock, ChartPie, ChevronRight, CreditCard, FileUp, LogOut, ShieldCheck, Tags, Target, TrendingUp, Wallet } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
 import { ChangePinForm } from "@/components/change-pin-form";
+import { ConnectClaude } from "@/components/connect-claude";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -35,6 +36,8 @@ export default function SettingsPage() {
         </div>
         <ChangePinForm />
       </section>
+
+      <ConnectClaude />
 
       <nav aria-label="More" className="divide-y divide-border rounded-2xl bg-surface-1 px-4">
         {MORE.map(({ href, label, hint, icon: Icon }) => (

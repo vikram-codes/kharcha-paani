@@ -1,4 +1,5 @@
 import "server-only";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { cacheLife } from "next/cache";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
@@ -19,8 +20,21 @@ async function session() {
   return authed();
 }
 
+/**
+ * Requests that don't come from the browser (Claude over MCP) carry no cookies.
+ * They run inside runAsUser(), with a Supabase client signed in as the owner,
+ * so every function below works the same way and RLS still applies.
+ */
+const userContext = new AsyncLocalStorage<{ db: Db; today: ISODate }>();
+
+export function runAsUser<T>(db: Db, fn: () => Promise<T>): Promise<T> {
+  return userContext.run({ db, today: todayISO() }, fn);
+}
+
 /** For `"use cache: private"` scopes, where connection() isn't allowed. */
 async function authed() {
+  const ctx = userContext.getStore();
+  if (ctx) return ctx;
   const db = await createClient();
   const { data } = await db.auth.getClaims();
   if (!data?.claims?.sub) redirect("/login");
@@ -1377,4 +1391,160 @@ export async function removeSplits(transactionId: string, categoryId: string | n
   const { db } = await authed();
   ok(await db.from("transaction_splits").delete().eq("transaction_id", transactionId).select("id"));
   ok(await db.from("transactions").update({ category_id: categoryId }).eq("id", transactionId).select("id"));
+}
+
+// ───────────────────────────── Claude connector links (phase 8) ─────────────────────────────
+
+export async function createConnectorToken(name: string) {
+  const { db } = await authed();
+  const { newToken, hashToken } = await import("./mcp/auth");
+  const token = newToken();
+  ok(await db.from("api_tokens").insert({ name: name.trim().slice(0, 40) || "Claude", token_hash: hashToken(token) }).select("id"));
+  return token;
+}
+
+export async function listConnectorTokens() {
+  const { db } = await authed();
+  return ok(await db.from("api_tokens").select("id,name,created_at,last_used_at,revoked_at").order("created_at", { ascending: false }));
+}
+
+export async function revokeConnectorToken(id: string) {
+  const { db } = await authed();
+  ok(await db.from("api_tokens").update({ revoked_at: new Date().toISOString() }).eq("id", id).select("id"));
+  const { forgetSessions } = await import("./mcp/auth");
+  forgetSessions();
+}
+
+// ───────────────────────────── Claude (MCP) drafts → confirm ─────────────────────────────
+
+export type DraftItemInput = {
+  type: "expense" | "income";
+  amount: number; // dollars
+  category?: string;
+  account?: string;
+  date?: string;
+  note?: string;
+  split?: { category: string; amount: number }[];
+  friend_owes?: { person: string; amount: number };
+};
+
+type DraftItem = {
+  kind: "expense" | "income";
+  cents: number;
+  categoryId: string | null;
+  category: string;
+  accountId: string;
+  account: string;
+  date: ISODate;
+  note: string | null;
+  splits: { categoryId: string; category: string; cents: number }[];
+  owes: { person: string; cents: number } | null;
+};
+
+const dollars = (c: number) => "$" + (c / 100).toFixed(2);
+
+const toCentsStrict = (d: number) => {
+  if (typeof d !== "number" || !Number.isFinite(d) || d <= 0 || d > 1_000_000) throw new Error("Invalid amount: " + d);
+  return Math.round(d * 100);
+};
+
+/** Resolves names → ids and stores a draft. Saves no transactions. */
+export async function draftTransactions(items: DraftItemInput[]) {
+  const { db, today } = await authed();
+  const { resolveAccount, resolveName } = await import("./mcp/resolve");
+  if (!items.length || items.length > 25) throw new Error("Send between 1 and 25 items.");
+  const [opts, prof] = await Promise.all([getEditOptions(), db.from("profiles").select("last_account_id").maybeSingle().then(okMaybe)]);
+  const problems: string[] = [];
+  const out: DraftItem[] = [];
+  items.forEach((it, n) => {
+    const tag = "Item " + (n + 1);
+    try {
+      const cents = toCentsStrict(it.amount);
+      const kind = it.type === "income" ? "income" : "expense";
+      const pool = opts.categories.filter((c) => c.kind === kind);
+      const last = prof?.last_account_id ? opts.accounts.find((a) => a.id === prof.last_account_id) : undefined;
+      const acct = it.account
+        ? resolveAccount(it.account, opts.accounts)
+        : last
+          ? { ok: true as const, id: last.id, name: last.name }
+          : { ok: false as const, options: opts.accounts.map((a) => a.name) };
+      if (!acct.ok) return void problems.push(tag + ": which account? " + acct.options.join(" / "));
+      const splits: DraftItem["splits"] = [];
+      for (const s of it.split ?? []) {
+        const r = resolveName(s.category, pool);
+        if (!r.ok) return void problems.push(tag + ': split category "' + s.category + '" is unclear. Options: ' + r.options.slice(0, 8).join(" / "));
+        splits.push({ categoryId: r.id, category: r.name, cents: toCentsStrict(s.amount) });
+      }
+      const splitSum = splits.reduce((t, s) => t + s.cents, 0);
+      if (splits.length && splitSum !== cents) return void problems.push(tag + ": split lines add up to " + dollars(splitSum) + ", not " + dollars(cents));
+      let categoryId: string | null = null;
+      let category = splits.length ? "Split" : "Uncategorized";
+      if (!splits.length) {
+        if (!it.category) return void problems.push(tag + ": which category?");
+        const r = resolveName(it.category, pool);
+        if (!r.ok) return void problems.push(tag + ': category "' + it.category + '" is unclear. Options: ' + r.options.slice(0, 8).join(" / "));
+        categoryId = r.id;
+        category = r.name;
+      }
+      const date = it.date && /^\d{4}-\d{2}-\d{2}$/.test(it.date) ? it.date : today;
+      if (date > today) return void problems.push(tag + ": date " + date + " is in the future");
+      const owes = it.friend_owes ? { person: it.friend_owes.person.trim().slice(0, 60), cents: toCentsStrict(it.friend_owes.amount) } : null;
+      if (owes && (!owes.person || owes.cents > cents)) return void problems.push(tag + ": friend_owes needs a name and can't exceed the amount");
+      out.push({ kind, cents, categoryId, category, accountId: acct.id, account: acct.name, date, note: it.note?.trim().slice(0, 200) || null, splits, owes });
+    } catch (e) {
+      problems.push(tag + ": " + (e as Error).message);
+    }
+  });
+  if (problems.length) return { ok: false as const, problems };
+  const lines = out.map(
+    (d) =>
+      (d.kind === "expense" ? "−" : "+") +
+      dollars(d.cents) +
+      " · " +
+      d.category +
+      (d.splits.length ? " (" + d.splits.map((s) => s.category + " " + dollars(s.cents)).join(" + ") + ")" : "") +
+      " · " +
+      d.account +
+      " · " +
+      d.date +
+      (d.note ? ' · "' + d.note + '"' : "") +
+      (d.owes ? " · " + d.owes.person + " owes " + dollars(d.owes.cents) : ""),
+  );
+  const [draft] = ok(await db.from("mcp_drafts").insert({ payload: { items: out }, summary: lines.join("\n") }).select("id"));
+  return { ok: true as const, draftId: draft.id, preview: lines };
+}
+
+/** Saves a draft (only after the owner said yes). Single use, expires after 24h. */
+export async function confirmDraft(id: string) {
+  const { db } = await authed();
+  const d = okMaybe(await db.from("mcp_drafts").select("id,payload,confirmed_at,discarded_at,created_at").eq("id", id).maybeSingle());
+  if (!d) throw new Error("Draft not found.");
+  if (d.confirmed_at) throw new Error("This draft was already saved.");
+  if (d.discarded_at) throw new Error("This draft was discarded.");
+  if (Date.now() - Date.parse(d.created_at) > 24 * 3_600_000) throw new Error("This draft expired. Make a new one.");
+  // Claim it first, so a double confirm can't save twice.
+  const claimed = ok(await db.from("mcp_drafts").update({ confirmed_at: new Date().toISOString() }).eq("id", id).is("confirmed_at", null).select("id"));
+  if (!claimed.length) throw new Error("This draft was already saved.");
+  const items = (d.payload as unknown as { items: DraftItem[] }).items;
+  const saved: string[] = [];
+  for (const it of items) {
+    const amount = it.kind === "expense" ? -it.cents : it.cents;
+    const [tx] = ok(
+      await db
+        .from("transactions")
+        .insert({ account_id: it.accountId, date: it.date, amount_cents: amount, description: it.note ?? it.category, note: it.note, category_id: it.splits.length ? null : it.categoryId, source: "mcp" })
+        .select("id"),
+    );
+    if (it.splits.length) {
+      ok(await db.from("transaction_splits").insert(it.splits.map((s) => ({ transaction_id: tx.id, category_id: s.categoryId, amount_cents: (amount < 0 ? -1 : 1) * s.cents }))).select("id"));
+    }
+    if (it.owes) ok(await db.from("shared_debts").insert({ person: it.owes.person, amount_cents: it.owes.cents, transaction_id: tx.id }).select("id"));
+    saved.push((it.kind === "expense" ? "−" : "+") + dollars(it.cents) + " " + it.category + " (" + it.account + ")");
+  }
+  return saved;
+}
+
+export async function discardDraft(id: string) {
+  const { db } = await authed();
+  ok(await db.from("mcp_drafts").update({ discarded_at: new Date().toISOString() }).eq("id", id).is("confirmed_at", null).select("id"));
 }

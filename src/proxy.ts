@@ -10,6 +10,8 @@ const PUBLIC_PATHS = ["/login"];
  */
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+  // Claude's connector authenticates with its own token (src/app/api/mcp), not a browser session.
+  if (pathname.startsWith("/api/mcp/")) return NextResponse.next();
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
   if (!isSupabaseConfigured) {
