@@ -49,3 +49,6 @@ next-env.d.ts
 
 # keep the template (must come after .env*)
 !.env.example
+
+# Private spec: kept locally, not on GitHub
+BUILD_PROMPT.md
