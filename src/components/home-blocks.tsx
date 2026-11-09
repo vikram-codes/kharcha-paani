@@ -12,7 +12,7 @@ import { daysBetween, formatDay, formatMonthName, formatShort } from "@/lib/date
 import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
-/** Shared blocks for the 2-column desktop Home mockups (temporary). */
+/** Home building blocks (layout A, owner picked Nov 9 2026). */
 export async function loadWideHome() {
   const h = await getHome();
   const [m, a] = await Promise.all([monthSummaryData(h.month), activityData(h.month)]);
@@ -67,7 +67,7 @@ export function Budget({ h, className }: { h: Data["h"]; className?: string }) {
 
 export function Tiles({ h, cols }: { h: Data["h"]; cols: 1 | 2 }) {
   return (
-    <section className={cn("grid gap-2", cols === 2 && "grid-cols-2")}>
+    <section className={cn("grid gap-2", cols === 2 && "md:grid-cols-2")}>
       <HomeTile href="/debts" icon={CreditCard} label="Debts" value={h.debts} sub={`${h.debtCounts.cards} cards${h.debtCounts.plans ? ` · ${h.debtCounts.plans} Affirm plans` : ""}`} />
       <HomeTile href="/investments" icon={TrendingUp} label="Investments" value={h.investments} sub={h.investmentCount ? `${h.investmentCount} accounts` : "Add your first account"} />
     </section>
@@ -158,20 +158,5 @@ export function Recent({ d }: { d: Data }) {
         ))}
       </div>
     </section>
-  );
-}
-
-export function Switch({ current }: { current: "a" | "b" }) {
-  return (
-    <div className="flex items-center gap-1 rounded-full bg-surface-1 p-1 text-xs font-medium">
-      {(["a", "b"] as const).map((v) => (
-        <Link key={v} href={`/mockups/home-wide/${v}`} className={cn("flex-1 rounded-full py-1.5 text-center", v === current ? "bg-lime text-on-lime" : "text-muted-foreground")}>
-          {v === "a" ? "A · Balances | This month" : "B · Side-by-side rows"}
-        </Link>
-      ))}
-      <Link href="/" className="flex-1 rounded-full py-1.5 text-center text-muted-foreground">
-        Current (1 column)
-      </Link>
-    </div>
   );
 }
