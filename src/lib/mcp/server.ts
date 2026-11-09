@@ -6,6 +6,7 @@ import {
   confirmDraft,
   discardDraft,
   draftTransactions,
+  draftTransfer,
   getBills,
   getCash,
   getDebts,
@@ -29,7 +30,7 @@ import { HISTORY } from "@/lib/periods";
 export const INSTRUCTIONS = `Kharcha-Paani is the owner's personal finance app (Canadian dollars, Toronto time).
 Money model: Cash = bank accounts (the emergency fund is private and never shown here). Debts = credit cards + Affirm; the student loan (India, 9.5%) is separate. Card purchases count as spending when made and raise that card's debt; card payments are transfers, not spending.
 Budget: a monthly headline budget plus fixed and variable lines. "Spent" excludes transfers, friend paybacks and balance adjustments.
-Writing: NEVER save without the owner's explicit yes. Always call draft_transactions first, show the preview lines to the owner, and call confirm_draft only after they clearly agree in this conversation. If the draft reports problems (unclear category/account), ask the owner instead of guessing.
+Writing: NEVER save without the owner's explicit yes. Always call draft_transactions (purchases/income) or draft_transfer (card payments, chequing↔savings) first, show the preview lines to the owner, and call confirm_draft only after they clearly agree in this conversation. If the draft reports problems (unclear category/account), ask the owner instead of guessing.
 Amounts in tool results are dollars. Expenses are negative in transaction lists.`;
 
 const $ = (c: number) => Math.round(c) / 100;
@@ -281,6 +282,32 @@ export function registerTools(server: McpServer) {
     async ({ items }) => {
       try {
         const r = await draftTransactions(items);
+        if (!r.ok) return text({ saved: false, problems: r.problems, next: "Ask the owner to clarify, then draft again." });
+        return text({ saved: false, draft_id: r.draftId, preview: r.preview, next: "Show this to the owner. Call confirm_draft only if they say yes." });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "draft_transfer",
+    {
+      title: "Draft a card payment or transfer (doesn't save)",
+      description:
+        "Prepare paying a credit card from a bank account (or moving money between chequing and savings). Not spending. SAVES NOTHING: show the preview to the owner and call confirm_draft only after they say yes.",
+      inputSchema: z.object({
+        to: z.string().describe('Card or account receiving the money, e.g. "Triangle", "CIBC", "Visa", "Savings"'),
+        from: z.string().optional().describe('Bank account it comes from; default "Chequing"'),
+        amount: z.number().positive().describe("Dollars"),
+        date: z.string().optional().describe("YYYY-MM-DD, default today"),
+        note: z.string().optional(),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    async (args) => {
+      try {
+        const r = await draftTransfer(args);
         if (!r.ok) return text({ saved: false, problems: r.problems, next: "Ask the owner to clarify, then draft again." });
         return text({ saved: false, draft_id: r.draftId, preview: r.preview, next: "Show this to the owner. Call confirm_draft only if they say yes." });
       } catch (e) {

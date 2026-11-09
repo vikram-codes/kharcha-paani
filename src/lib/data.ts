@@ -495,7 +495,55 @@ export async function getQuickAddOptions() {
     lastAccountId: lastAccountId ?? payFrom.find((a) => a.account_group === "debt_card")?.id ?? payFrom[0]?.id ?? null,
     expense: pick("expense"),
     income: pick("income"),
+    // Transfers: money leaves a bank account, goes to a card (payment) or another bank account (e.g. savings).
+    transferFrom: accounts.filter((a) => a.account_group === "cash_bank").map((a) => ({ id: a.id, name: a.name, last4: a.last4 })),
+    transferTo: accounts.map((a) => ({ id: a.id, name: a.name, last4: a.last4, card: a.account_group === "debt_card" })),
   };
+}
+
+/**
+ * Card payment or bank-to-bank move (§3.4): a linked pair, money out of `from`
+ * and into `to`. Not spending, not income: chequing goes down, the card's debt
+ * goes down (or savings goes up).
+ */
+export async function createTransfer(input: { fromId: string; toId: string; cents: number; date: ISODate; note?: string | null }) {
+  const { db, today } = await authed();
+  if (!Number.isInteger(input.cents) || input.cents <= 0 || input.cents > 100_000_000) throw new Error("Enter an amount.");
+  if (input.fromId === input.toId) throw new Error("Pick two different accounts.");
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(input.date) ? input.date : today;
+  const accts = ok(await db.from("accounts").select("id,name,account_group").in("id", [input.fromId, input.toId]));
+  const from = accts.find((a) => a.id === input.fromId);
+  const to = accts.find((a) => a.id === input.toId);
+  if (!from || from.account_group !== "cash_bank") throw new Error("Transfers come from a bank account (chequing or savings).");
+  if (!to || !["cash_bank", "debt_card"].includes(to.account_group)) throw new Error("Send it to a card or a bank account.");
+  const key = to.account_group === "debt_card" ? "cc_payment" : "savings_xfer";
+  const cat = okMaybe(await db.from("categories").select("id").eq("key", key).maybeSingle());
+  const note = input.note?.trim().slice(0, 200) || null;
+  const label = to.account_group === "debt_card" ? `Payment to ${to.name}` : `To ${to.name}`;
+  const [out] = ok(
+    await db
+      .from("transactions")
+      .insert({ account_id: from.id, date, amount_cents: -input.cents, description: label, note, category_id: cat?.id ?? null, is_transfer: true, source: "manual" })
+      .select("id"),
+  );
+  const [inn] = ok(
+    await db
+      .from("transactions")
+      .insert({
+        account_id: to.id,
+        date,
+        amount_cents: input.cents,
+        description: to.account_group === "debt_card" ? `Payment from ${from.name}` : `From ${from.name}`,
+        note,
+        category_id: cat?.id ?? null,
+        is_transfer: true,
+        source: "manual",
+        transfer_pair_id: out.id,
+      })
+      .select("id"),
+  );
+  ok(await db.from("transactions").update({ transfer_pair_id: inn.id }).eq("id", out.id).select("id"));
+  return { from: from.name, to: to.name };
 }
 
 export type NewTransaction = {
@@ -1525,6 +1573,11 @@ export async function confirmDraft(id: string) {
   // Claim it first, so a double confirm can't save twice.
   const claimed = ok(await db.from("mcp_drafts").update({ confirmed_at: new Date().toISOString() }).eq("id", id).is("confirmed_at", null).select("id"));
   if (!claimed.length) throw new Error("This draft was already saved.");
+  const transfer = (d.payload as unknown as { transfer?: { fromId: string; toId: string; cents: number; date: ISODate; note: string | null; from: string; to: string } }).transfer;
+  if (transfer) {
+    await createTransfer(transfer);
+    return [dollars(transfer.cents) + " transfer: " + transfer.from + " → " + transfer.to];
+  }
   const items = (d.payload as unknown as { items: DraftItem[] }).items;
   const saved: string[] = [];
   for (const it of items) {
@@ -1547,4 +1600,25 @@ export async function confirmDraft(id: string) {
 export async function discardDraft(id: string) {
   const { db } = await authed();
   ok(await db.from("mcp_drafts").update({ discarded_at: new Date().toISOString() }).eq("id", id).is("confirmed_at", null).select("id"));
+}
+
+/** Draft a card payment / bank-to-bank move for Claude. Saves nothing. */
+export async function draftTransfer(input: { from?: string; to: string; amount: number; date?: string; note?: string }) {
+  const { db, today } = await authed();
+  const { resolveAccount } = await import("./mcp/resolve");
+  const o = await getQuickAddOptions();
+  const cents = toCentsStrict(input.amount);
+  const fromR = resolveAccount(input.from ?? "chequing", o.transferFrom);
+  const toR = resolveAccount(input.to, o.transferTo);
+  const problems: string[] = [];
+  if (!fromR.ok) problems.push("From which bank account? " + fromR.options.join(" / "));
+  if (!toR.ok) problems.push("To which card or account? " + toR.options.join(" / "));
+  const date = input.date && /^\d{4}-\d{2}-\d{2}$/.test(input.date) ? input.date : today;
+  if (date > today) problems.push("Date " + date + " is in the future");
+  if (!fromR.ok || !toR.ok || problems.length) return { ok: false as const, problems };
+  if (fromR.id === toR.id) return { ok: false as const, problems: ["From and to are the same account."] };
+  const transfer = { fromId: fromR.id, toId: toR.id, cents, date, note: input.note?.trim().slice(0, 200) || null, from: fromR.name, to: toR.name };
+  const line = dollars(cents) + " · " + fromR.name + " → " + toR.name + " · " + date + " (transfer: not spending)";
+  const [draft] = ok(await db.from("mcp_drafts").insert({ payload: { transfer }, summary: line }).select("id"));
+  return { ok: true as const, draftId: draft.id, preview: [line] };
 }

@@ -1,20 +1,48 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition, type ReactElement } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  useTransition,
+  type ReactElement,
+} from "react";
 import { Delete, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { addTransaction, loadQuickAdd } from "@/app/actions/transactions";
+import {
+  addTransaction,
+  addTransfer,
+  loadQuickAdd,
+} from "@/app/actions/transactions";
 import { CategoryChip } from "@/components/category-icon";
 import { ThemedSelect } from "@/components/themed-select";
 import { ResponsiveSheetContent } from "@/components/ui/responsive-sheet";
-import { Sheet, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetDescription,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { formatCents, parseToCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 type Options = Awaited<ReturnType<typeof loadQuickAdd>>;
-type Kind = "expense" | "income";
+type Kind = "expense" | "income" | "transfer";
 
-const KEYS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "⌫"] as const;
+const KEYS = [
+  "1",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  ".",
+  "0",
+  "⌫",
+] as const;
 const SHOWN = 8;
 
 /** "Scotiabank Scene+ Visa" → "Scene+ Visa", "Costco CIBC Mastercard" → "Costco CIBC". */
@@ -25,7 +53,8 @@ function shortName(name: string) {
 /** Typed amount → next amount string (max 7 digits, 2 decimals). */
 function press(current: string, key: string): string {
   if (key === "⌫") return current.slice(0, -1);
-  if (key === ".") return current.includes(".") ? current : (current || "0") + ".";
+  if (key === ".")
+    return current.includes(".") ? current : (current || "0") + ".";
   const [whole, frac] = current.split(".");
   if (frac !== undefined) return frac.length >= 2 ? current : current + key;
   if (whole.length >= 7) return current;
@@ -43,6 +72,8 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
   const [amount, setAmount] = useState("");
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [accountId, setAccountId] = useState<string>("");
+  const [fromId, setFromId] = useState<string>("");
+  const [toId, setToId] = useState<string>("");
   const [date, setDate] = useState("");
   const [note, setNote] = useState("");
   const [showAll, setShowAll] = useState(false);
@@ -54,6 +85,23 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
       const o = await loadQuickAdd();
       setOpts(o);
       setAccountId((a) => a || o.lastAccountId || "");
+      // Transfers default to chequing → the last card used (or the first card).
+      setFromId(
+        (f) =>
+          f ||
+          o.transferFrom.find((a) => /chequing/i.test(a.name))?.id ||
+          o.transferFrom[0]?.id ||
+          "",
+      );
+      setToId(
+        (t) =>
+          t ||
+          (
+            o.transferTo.find((a) => a.id === o.lastAccountId && a.card) ??
+            o.transferTo.find((a) => a.card)
+          )?.id ||
+          "",
+      );
       setDate((d) => d || o.today);
     });
 
@@ -67,38 +115,83 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
       setShowAll(false);
       setDate("");
       setAccountId("");
+      setFromId("");
+      setToId("");
       load(); // fresh "last used" account + frequent categories each time
     }
   };
 
   // "12." is a valid in-progress entry: drop the trailing dot before parsing.
-  const cents = amount && amount !== "." ? parseToCents(amount.replace(/\.$/, "") || "0") : 0;
+  const cents =
+    amount && amount !== "."
+      ? parseToCents(amount.replace(/\.$/, "") || "0")
+      : 0;
   const cats = (kind === "expense" ? opts?.expense : opts?.income) ?? [];
   const visible = showAll ? cats : cats.slice(0, SHOWN);
-  const canSave = cents > 0 && !!categoryId && !!accountId && !saving;
+  const isTransfer = kind === "transfer";
+  const canSave = isTransfer
+    ? cents > 0 && !!fromId && !!toId && fromId !== toId && !saving
+    : cents > 0 && !!categoryId && !!accountId && !saving;
 
   const save = useCallback(() => {
-    if (!canSave || !categoryId) return;
+    if (!canSave) return;
+    if (isTransfer) {
+      startSaving(async () => {
+        const res = await addTransfer({ fromId, toId, cents, date, note });
+        if (!res.ok) return void toast.error(res.error);
+        toast.success(`${formatCents(cents)} · ${res.message}`);
+        setAmount("");
+        setNote("");
+        setOpen(false);
+      });
+      return;
+    }
+    if (!categoryId || isTransfer) return;
     startSaving(async () => {
-      const res = await addTransaction({ kind, amountCents: cents, accountId, categoryId, date, note });
+      const res = await addTransaction({
+        kind: kind as "expense" | "income",
+        amountCents: cents,
+        accountId,
+        categoryId,
+        date,
+        note,
+      });
       if (!res.ok) {
         toast.error(res.error);
         return;
       }
-      toast.success(`${kind === "expense" ? "−" : "+"}${formatCents(cents)} · ${res.message}`);
+      toast.success(
+        `${kind === "expense" ? "−" : "+"}${formatCents(cents)} · ${res.message}`,
+      );
       setAmount("");
       setCategoryId(null);
       setNote("");
       setOpen(false);
     });
-  }, [canSave, categoryId, kind, cents, accountId, date, note]);
+  }, [
+    canSave,
+    isTransfer,
+    fromId,
+    toId,
+    categoryId,
+    kind,
+    cents,
+    accountId,
+    date,
+    note,
+  ]);
 
   // Desktop: type the amount, Enter to save.
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA") return;
+      if (
+        t.tagName === "INPUT" ||
+        t.tagName === "SELECT" ||
+        t.tagName === "TEXTAREA"
+      )
+        return;
       if (/^[0-9.]$/.test(e.key)) setAmount((a) => press(a, e.key));
       else if (e.key === "Backspace") setAmount((a) => press(a, "⌫"));
       else if (e.key === "Enter") save();
@@ -114,9 +207,14 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
         <div className="flex flex-col gap-4 px-5 pt-2 pb-5 md:pt-5">
           <div className="flex items-center justify-between">
             <SheetTitle className="text-base font-semibold">Add</SheetTitle>
-            <SheetDescription className="sr-only">Enter an amount, pick a category and where it was paid from.</SheetDescription>
-            <div className="flex rounded-full bg-surface-1 p-1 text-xs font-medium" role="tablist">
-              {(["expense", "income"] as const).map((k) => (
+            <SheetDescription className="sr-only">
+              Enter an amount, pick a category and where it was paid from.
+            </SheetDescription>
+            <div
+              className="flex rounded-full bg-surface-1 p-1 text-xs font-medium"
+              role="tablist"
+            >
+              {(["expense", "income", "transfer"] as const).map((k) => (
                 <button
                   key={k}
                   type="button"
@@ -129,10 +227,16 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
                   }}
                   className={cn(
                     "rounded-full px-3 py-1.5 transition-colors duration-(--duration-fast)",
-                    kind === k ? "bg-surface-3 text-foreground" : "text-muted-foreground",
+                    kind === k
+                      ? "bg-surface-3 text-foreground"
+                      : "text-muted-foreground",
                   )}
                 >
-                  {k === "expense" ? "Expense" : "Money in"}
+                  {k === "expense"
+                    ? "Expense"
+                    : k === "income"
+                      ? "Money in"
+                      : "Transfer"}
                 </button>
               ))}
             </div>
@@ -150,17 +254,70 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
             ${amount || "0"}
           </p>
 
+          {isTransfer && (
+            <div className="flex flex-col gap-2">
+              <ThemedSelect
+                ariaLabel="Transfer from"
+                prefix="From"
+                value={fromId || null}
+                onChange={(v) => v && setFromId(v)}
+                disabled={!opts}
+                placeholder="Loading…"
+                options={(opts?.transferFrom ?? []).map((a) => ({
+                  value: a.id,
+                  label: shortName(a.name),
+                  hint: a.last4 ? `••${a.last4}` : undefined,
+                }))}
+              />
+              <ThemedSelect
+                ariaLabel="Transfer to"
+                prefix="To"
+                value={toId || null}
+                onChange={(v) => v && setToId(v)}
+                disabled={!opts}
+                placeholder="Loading…"
+                options={(opts?.transferTo ?? [])
+                  .filter((a) => a.id !== fromId)
+                  .map((a) => ({
+                    value: a.id,
+                    label: shortName(a.name),
+                    hint: a.card
+                      ? `card payment${a.last4 ? ` · ••${a.last4}` : ""}`
+                      : a.last4
+                        ? `••${a.last4}`
+                        : undefined,
+                  }))}
+              />
+              <p className="px-1 text-[11px] text-muted-foreground">
+                Not spending: the money leaves{" "}
+                {fromId ? "the bank account" : "chequing"} and lowers what you
+                owe on the card (or moves to savings).
+              </p>
+            </div>
+          )}
+
           {/* Paid from + date */}
-          <div className="grid grid-cols-[1fr_auto] gap-2">
-            <ThemedSelect
-              ariaLabel={kind === "expense" ? "Paid from" : "Deposited to"}
-              prefix={kind === "expense" ? "From" : "Into"}
-              value={accountId || null}
-              onChange={(v) => v && setAccountId(v)}
-              disabled={!opts}
-              placeholder="Loading…"
-              options={(opts?.accounts ?? []).map((a) => ({ value: a.id, label: shortName(a.name), hint: a.last4 ? `••${a.last4}` : undefined }))}
-            />
+          <div
+            className={cn(
+              "grid gap-2",
+              isTransfer ? "grid-cols-1" : "grid-cols-[1fr_auto]",
+            )}
+          >
+            {!isTransfer && (
+              <ThemedSelect
+                ariaLabel={kind === "expense" ? "Paid from" : "Deposited to"}
+                prefix={kind === "expense" ? "From" : "Into"}
+                value={accountId || null}
+                onChange={(v) => v && setAccountId(v)}
+                disabled={!opts}
+                placeholder="Loading…"
+                options={(opts?.accounts ?? []).map((a) => ({
+                  value: a.id,
+                  label: shortName(a.name),
+                  hint: a.last4 ? `••${a.last4}` : undefined,
+                }))}
+              />
+            )}
             <input
               type="date"
               value={date}
@@ -172,32 +329,49 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
           </div>
 
           {/* Categories */}
-          <div>
-            <div className="grid grid-cols-4 gap-2">
-              {loading && !opts
-                ? Array.from({ length: SHOWN }, (_, i) => <span key={i} className="h-[68px] animate-pulse rounded-xl bg-surface-1" />)
-                : visible.map((c) => (
-                    <button
-                      key={c.id}
-                      type="button"
-                      onClick={() => setCategoryId(c.id)}
-                      aria-pressed={categoryId === c.id}
-                      className={cn(
-                        "flex h-[68px] flex-col items-center justify-center gap-1 rounded-xl bg-surface-1 px-1 transition-colors duration-(--duration-fast)",
-                        categoryId === c.id ? "bg-surface-2 ring-2 ring-lime" : "hover:bg-surface-2",
-                      )}
-                    >
-                      <CategoryChip icon={c.icon} color={c.color} size="sm" />
-                      <span className="line-clamp-1 text-[11px] leading-tight">{c.name.replace(/\s*\(.*\)$/, "")}</span>
-                    </button>
-                  ))}
+          {!isTransfer && (
+            <div>
+              <div className="grid grid-cols-4 gap-2">
+                {loading && !opts
+                  ? Array.from({ length: SHOWN }, (_, i) => (
+                      <span
+                        key={i}
+                        className="h-[68px] animate-pulse rounded-xl bg-surface-1"
+                      />
+                    ))
+                  : visible.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setCategoryId(c.id)}
+                        aria-pressed={categoryId === c.id}
+                        className={cn(
+                          "flex h-[68px] flex-col items-center justify-center gap-1 rounded-xl bg-surface-1 px-1 transition-colors duration-(--duration-fast)",
+                          categoryId === c.id
+                            ? "bg-surface-2 ring-2 ring-lime"
+                            : "hover:bg-surface-2",
+                        )}
+                      >
+                        <CategoryChip icon={c.icon} color={c.color} size="sm" />
+                        <span className="line-clamp-1 text-[11px] leading-tight">
+                          {c.name.replace(/\s*\(.*\)$/, "")}
+                        </span>
+                      </button>
+                    ))}
+              </div>
+              {cats.length > SHOWN && (
+                <button
+                  type="button"
+                  onClick={() => setShowAll((v) => !v)}
+                  className="mt-2 w-full text-center text-xs text-muted-foreground hover:text-foreground"
+                >
+                  {showAll
+                    ? "Fewer categories"
+                    : `All ${cats.length} categories`}
+                </button>
+              )}
             </div>
-            {cats.length > SHOWN && (
-              <button type="button" onClick={() => setShowAll((v) => !v)} className="mt-2 w-full text-center text-xs text-muted-foreground hover:text-foreground">
-                {showAll ? "Fewer categories" : `All ${cats.length} categories`}
-              </button>
-            )}
-          </div>
+          )}
 
           <input
             value={note}
@@ -228,7 +402,15 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
             disabled={!canSave}
             className="flex h-12 items-center justify-center gap-2 rounded-xl bg-lime font-semibold text-on-lime transition-transform duration-(--duration-fast) active:scale-[0.98] disabled:opacity-40"
           >
-            {saving ? <Loader2 className="size-5 animate-spin" /> : cents > 0 ? `Save ${formatCents(cents)}` : "Save"}
+            {saving ? (
+              <Loader2 className="size-5 animate-spin" />
+            ) : cents > 0 ? (
+              `${isTransfer ? (opts?.transferTo.find((a) => a.id === toId)?.card ? "Pay" : "Move") : "Save"} ${formatCents(cents)}`
+            ) : isTransfer ? (
+              "Transfer"
+            ) : (
+              "Save"
+            )}
           </button>
         </div>
       </ResponsiveSheetContent>
