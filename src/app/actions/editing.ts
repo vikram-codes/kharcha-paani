@@ -16,11 +16,12 @@ async function run(fn: () => Promise<unknown>): Promise<Result> {
   }
 }
 
-export async function saveBudget(input: { month: string; scope: "month" | "default"; totalCents: number | null; lines: { id: string; cents: number }[] }) {
+/** Saves the budget: line amounts become the monthly amounts (and replace any one-off override for this month). */
+export async function saveBudget(input: { month: string; totalCents: number | null; lines: { id: string; cents: number }[] }) {
   if (!isMonthKey(input.month)) return { ok: false as const, error: "Unknown month" };
   return run(async () => {
     if (input.totalCents != null) await setMonthlyBudget(input.totalCents);
-    await setBudgetLines(input.month, input.scope, input.lines);
+    await setBudgetLines(input.month, "default", input.lines);
   });
 }
 

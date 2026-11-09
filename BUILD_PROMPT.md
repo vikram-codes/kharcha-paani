@@ -279,7 +279,7 @@ Tapping a tile opens its section:
 - **Headline budget is a round $3,000/month** (`profiles.monthly_budget_cents`), used by the Home hero, the Summary budget card and Budgets. The lines underneath are the detailed plan; Budgets shows the gap as a buffer, or as "over the $3,000".
 - Home starts with a greeting (time of day + name from `profiles.display_name`) and today's date. Money owed to the owner is shown greyed under Cash and is never added to it.
 
-**Editing in the app (built Nov 8, 2026):** Budgets → Edit sets the monthly total and every line, "From now on" (line defaults) or "Only <month>" (overrides). Debts / Cash → tap a balance → Update balance (reconcile snapshot as of today). Cash → Owed to you: add, mark paid back, remove. Transaction edit sheet → "Friend owes me" (half / third / quarter presets): that part is subtracted from the transaction in summaries and budgets and appears on the Owed list.
+**Editing in the app (built Nov 8, 2026):** Budgets → Edit sets the monthly total and every line (one plain budget; no per-month options in the UI, owner's choice). Unsaved edits are discarded when the sheet closes. Debts / Cash → tap a balance → Update balance (reconcile snapshot as of today). Cash → Owed to you: add, mark paid back, remove. Transaction edit sheet → "Friend owes me" (half / third / quarter presets): that part is subtracted from the transaction in summaries and budgets and appears on the Owed list.
 
 ### 7.8 Savings goals
 - Name, target amount, monthly contribution (feeds `savings_target`), progress. A goal can be linked to the savings account.
