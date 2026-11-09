@@ -4,11 +4,12 @@ import { AnimatedCents } from "@/components/animated-number";
 import { CashCard } from "@/components/cash-card";
 import { CategoryChip } from "@/components/category-icon";
 import { HomeTile } from "@/components/home-tile";
+import { SavingsPromptCard } from "@/components/savings-prompt";
 import { Reveal } from "@/components/reveal";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bandColorVar } from "@/lib/budget";
 import { daysBetween, formatDay, formatMonthName, formatShort } from "@/lib/dates";
-import { getHome } from "@/lib/data";
+import { getHome, getSavingsPrompts } from "@/lib/data";
 import { formatCents } from "@/lib/money";
 
 /**
@@ -27,7 +28,7 @@ export default function HomePage() {
 }
 
 async function Home() {
-  const h = await getHome();
+  const [h, prompts] = await Promise.all([getHome(), getSavingsPrompts()]);
   const pct = h.budget ? Math.round((h.spent / h.budget) * 100) : 0;
   const left = h.budget - h.spent;
 
@@ -55,6 +56,10 @@ async function Home() {
         owedToMe={h.owedToMe}
         paydayLabel={h.nextPayday ? formatDay(h.nextPayday) : null}
       />
+
+      {prompts.map((p) => (
+        <SavingsPromptCard key={p.key} prompt={p} />
+      ))}
 
       {/* Budget → this month's summary */}
       <Link href={`/summary/${h.month}`} className="group block rounded-2xl bg-surface-1 p-4 transition-colors duration-(--duration-fast) hover:bg-surface-2">
@@ -95,7 +100,12 @@ async function Home() {
 
       {h.upcoming.length > 0 && (
         <section>
-          <h2 className="mb-1 px-1 text-sm font-medium text-muted-foreground">Coming up</h2>
+          <div className="mb-1 flex items-center justify-between px-1">
+            <h2 className="text-sm font-medium text-muted-foreground">Coming up</h2>
+            <Link href="/bills" className="text-xs font-medium text-lime-ink">
+              Manage
+            </Link>
+          </div>
           <div className="rounded-2xl border border-dashed border-border px-4 py-1">
             {h.upcoming.map((u) => {
               const inDays = daysBetween(h.today, u.date);

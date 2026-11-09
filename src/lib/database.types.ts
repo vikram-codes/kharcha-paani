@@ -313,6 +313,24 @@ export type Database = {
           },
         ]
       }
+      dismissals: {
+        Row: {
+          created_at: string
+          key: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          key: string
+          user_id?: string
+        }
+        Update: {
+          created_at?: string
+          key?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       imports: {
         Row: {
           created_at: string
@@ -494,6 +512,7 @@ export type Database = {
           created_at: string
           end_date: string | null
           id: string
+          merchant_key: string | null
           name: string
           next_date: string
           note: string | null
@@ -510,6 +529,7 @@ export type Database = {
           created_at?: string
           end_date?: string | null
           id?: string
+          merchant_key?: string | null
           name: string
           next_date: string
           note?: string | null
@@ -526,6 +546,7 @@ export type Database = {
           created_at?: string
           end_date?: string | null
           id?: string
+          merchant_key?: string | null
           name?: string
           next_date?: string
           note?: string | null

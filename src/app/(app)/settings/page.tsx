@@ -1,10 +1,19 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ChevronRight, FileUp, LogOut, ShieldCheck } from "lucide-react";
+import { CalendarClock, ChevronRight, CreditCard, FileUp, LogOut, ShieldCheck, Target, Wallet } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
 import { ChangePinForm } from "@/components/change-pin-form";
 
 export const metadata: Metadata = { title: "Settings" };
+
+// Phones have no sidebar: everything that isn't a tab is reachable from here.
+const MORE = [
+  { href: "/bills", label: "Bills", hint: "Upcoming payments, add or stop bills", icon: CalendarClock },
+  { href: "/goals", label: "Savings goals", hint: "Targets and monthly amounts", icon: Target },
+  { href: "/cash", label: "Cash", hint: "Bank accounts, emergency fund, owed to you", icon: Wallet },
+  { href: "/debts", label: "Debts", hint: "Cards, Affirm, student loan", icon: CreditCard },
+  { href: "/imports", label: "Import a statement", hint: "PDF from Scotiabank, CIBC or Triangle", icon: FileUp },
+];
 
 export default function SettingsPage() {
   return (
@@ -24,16 +33,20 @@ export default function SettingsPage() {
         <ChangePinForm />
       </section>
 
-      <Link href="/imports" className="flex items-center gap-3 rounded-2xl bg-surface-1 p-4 transition-colors duration-(--duration-fast) hover:bg-surface-2">
-        <span className="grid size-10 place-items-center rounded-xl bg-surface-2 text-lime-ink">
-          <FileUp className="size-[18px]" />
-        </span>
-        <span className="flex-1">
-          <span className="block text-sm font-medium">Import a statement</span>
-          <span className="block text-xs text-muted-foreground">Upload a PDF from Scotiabank, CIBC or Triangle</span>
-        </span>
-        <ChevronRight className="size-4 text-muted-foreground" />
-      </Link>
+      <nav aria-label="More" className="divide-y divide-border rounded-2xl bg-surface-1 px-4">
+        {MORE.map(({ href, label, hint, icon: Icon }) => (
+          <Link key={href} href={href} className="flex items-center gap-3 py-3">
+            <span className="grid size-10 place-items-center rounded-xl bg-surface-2 text-lime-ink">
+              <Icon className="size-[18px]" />
+            </span>
+            <span className="flex-1">
+              <span className="block text-sm font-medium">{label}</span>
+              <span className="block text-xs text-muted-foreground">{hint}</span>
+            </span>
+            <ChevronRight className="size-4 text-muted-foreground" />
+          </Link>
+        ))}
+      </nav>
 
       <form action={signOut}>
         <button

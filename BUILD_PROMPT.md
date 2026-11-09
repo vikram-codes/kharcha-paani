@@ -281,6 +281,8 @@ Tapping a tile opens its section:
 
 **Editing in the app (built Nov 8, 2026):** Budgets → Edit sets the monthly total and every line (one plain budget; no per-month options in the UI, owner's choice). Unsaved edits are discarded when the sheet closes. Debts / Cash → tap a balance → Update balance (reconcile snapshot as of today). Cash → Owed to you: add, mark paid back, remove. Transaction edit sheet → "Friend owes me" (half / third / quarter presets): that part is subtracted from the transaction in summaries and budgets and appears on the Owed list.
 
+**Bills, prompts, goals (built Nov 8, 2026, phase A):** `/bills` lists upcoming bills (add / edit / stop / delete) and "Looks like a bill" suggestions (same merchant ≥3× about monthly within 15% of the typical amount, over the last ~4 months; skips merchants and same-category amounts already covered by a bill; Dismiss is remembered in `dismissals`). Home shows savings prompts: the **3rd paycheque** (from that payday to the 5th of next month) and **month-end leftover** (last 3 days of the month to the 5th of the next, only if under the $3,000). "Move to savings" records a linked chequing → savings transfer pair. `/goals`: target, monthly amount, optional linked savings account for progress. On phones, Settings is the hub for Bills, Goals, Cash, Debts and Imports. Dev only: `KP_FAKE_TODAY=YYYY-MM-DD npm run dev` pretends it's another day.
+
 ### 7.8 Savings goals
 - Name, target amount, monthly contribution (feeds `savings_target`), progress. A goal can be linked to the savings account.
 

@@ -1,5 +1,6 @@
 import {
   ArrowLeftRight,
+  CalendarClock,
   ChartPie,
   CreditCard,
   FileUp,
@@ -41,6 +42,7 @@ export const sidebarSections: { title?: string; items: NavItem[] }[] = [
     items: [
       { href: "/cash", label: "Cash", icon: Wallet },
       { href: "/debts", label: "Debts", icon: CreditCard },
+      { href: "/bills", label: "Bills", icon: CalendarClock },
       { href: "/investments", label: "Investments", icon: TrendingUp },
       { href: "/goals", label: "Goals", icon: Target },
     ],

@@ -20,8 +20,13 @@ export function ymd(y: number, month1: number, day: number): ISODate {
   return toISO(new Date(Date.UTC(y, month1 - 1, day)));
 }
 
-/** Today's date in Toronto. */
+/**
+ * Today's date in Toronto. In local development only, KP_FAKE_TODAY=YYYY-MM-DD
+ * pretends it's another day (to test month-end and payday prompts).
+ */
 export function todayISO(now: Date = new Date()): ISODate {
+  const fake = typeof process !== "undefined" && process.env.NODE_ENV === "development" ? process.env.KP_FAKE_TODAY : undefined;
+  if (fake && /^\d{4}-\d{2}-\d{2}$/.test(fake)) return fake;
   return new Intl.DateTimeFormat("en-CA", { timeZone: TIMEZONE }).format(now);
 }
 

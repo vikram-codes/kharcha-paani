@@ -970,3 +970,221 @@ export async function deleteOwed(id: string) {
   const { db } = await authed();
   ok(await db.from("shared_debts").delete().eq("id", id).select("id"));
 }
+
+// ───────────────────────────── bills (§7.7) ─────────────────────────────
+
+/** Next date ≥ today for a series, or null if it has ended. */
+function nextOccurrence(r: { cadence: string; next_date: string; end_date: string | null }, today: ISODate): ISODate | null {
+  let d = r.next_date as ISODate;
+  if (r.cadence === "monthly") for (let i = 1; d < today; i++) d = addMonths(r.next_date, i);
+  if (d < today || (r.end_date && d > r.end_date)) return null;
+  return d;
+}
+
+async function dismissedKeys(db: Db) {
+  return new Set(ok(await db.from("dismissals").select("key")).map((d) => d.key));
+}
+
+export async function getBills() {
+  const { db, today } = await authed();
+  const { detectRecurring, merchantKey } = await import("./recurring");
+  const [series, cats, accounts, recent, dismissed] = await Promise.all([
+    db.from("recurring_series").select("id,name,note,amount_cents,cadence,next_date,end_date,active,account_id,category_id,merchant_key").order("next_date").then(ok),
+    categories(db),
+    db.from("accounts").select("id,key,name,account_group,last4").then(ok),
+    db
+      .from("transactions")
+      .select("date,amount_cents,description,account_id,category_id,is_transfer")
+      .gte("date", addDays(today, -125))
+      .eq("in_reports", true)
+      .eq("is_transfer", false)
+      .lt("amount_cents", 0)
+      .limit(2000)
+      .then(ok),
+    dismissedKeys(db),
+  ]);
+  const acct = new Map(accounts.map((a) => [a.id, a]));
+  const bills = series.map((s) => {
+    const c = s.category_id ? cats.get(s.category_id) : undefined;
+    return {
+      id: s.id,
+      name: s.name,
+      note: s.note,
+      amount_cents: Number(s.amount_cents),
+      cadence: s.cadence as "once" | "monthly",
+      startDate: s.next_date as ISODate,
+      endDate: s.end_date as ISODate | null,
+      next: s.active ? nextOccurrence(s, today) : null,
+      active: s.active,
+      accountId: s.account_id,
+      account: s.account_id ? (acct.get(s.account_id)?.name ?? null) : null,
+      categoryId: s.category_id,
+      category: c ? { name: c.name, icon: c.icon, color: c.color } : null,
+      merchantKey: s.merchant_key,
+    };
+  });
+  const known = new Set(bills.flatMap((b) => [b.merchantKey, merchantKey(b.name)].filter(Boolean) as string[]));
+  const suggestions = detectRecurring(recent.map((r) => ({ ...r, amount_cents: Number(r.amount_cents) })))
+    .filter((s) => !known.has(s.key) && !dismissed.has(`bill:${s.key}`))
+    // Already covered by a bill in the same category at about the same amount (e.g. rent paid by e-Transfer).
+    .filter(
+      (s) =>
+        !bills.some(
+          (b) => b.active && b.categoryId && b.categoryId === s.category_id && Math.abs(b.amount_cents - s.amount_cents) <= Math.abs(b.amount_cents) * 0.15,
+        ),
+    )
+    .map((s) => {
+      const c = s.category_id ? cats.get(s.category_id) : undefined;
+      return { ...s, account: acct.get(s.account_id)?.name ?? null, category: c ? { name: c.name, icon: c.icon, color: c.color } : null };
+    });
+  return { today, bills, suggestions };
+}
+
+export type BillInput = {
+  id?: string;
+  name: string;
+  note?: string | null;
+  amountCents: number; // positive; saved as money out
+  accountId: string | null;
+  categoryId: string | null;
+  cadence: "once" | "monthly";
+  nextDate: ISODate;
+  endDate?: ISODate | null;
+  merchantKey?: string | null;
+};
+
+export async function saveBill(b: BillInput) {
+  const { db } = await authed();
+  const name = b.name.trim().slice(0, 60);
+  if (!name) throw new Error("Give the bill a name.");
+  if (!Number.isInteger(b.amountCents) || b.amountCents <= 0) throw new Error("Enter an amount.");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(b.nextDate)) throw new Error("Pick the next due date.");
+  if (b.endDate && !/^\d{4}-\d{2}-\d{2}$/.test(b.endDate)) throw new Error("Pick a valid end date.");
+  const row = {
+    name,
+    note: b.note?.trim().slice(0, 80) || null,
+    amount_cents: -b.amountCents,
+    account_id: b.accountId,
+    category_id: b.categoryId,
+    cadence: b.cadence,
+    next_date: b.nextDate,
+    end_date: b.cadence === "monthly" ? b.endDate || null : null,
+    merchant_key: b.merchantKey ?? null,
+    active: true,
+    confirmed: true,
+  };
+  if (b.id) ok(await db.from("recurring_series").update(row).eq("id", b.id).select("id"));
+  else ok(await db.from("recurring_series").insert(row).select("id"));
+}
+
+export async function setBillActive(id: string, active: boolean) {
+  const { db } = await authed();
+  ok(await db.from("recurring_series").update({ active }).eq("id", id).select("id"));
+}
+
+export async function deleteBill(id: string) {
+  const { db } = await authed();
+  ok(await db.from("recurring_series").delete().eq("id", id).select("id"));
+}
+
+export async function dismiss(key: string) {
+  const { db } = await authed();
+  if (!/^[a-z-]+:[\w :.-]{1,80}$/i.test(key)) throw new Error("Bad key");
+  ok(await db.from("dismissals").upsert({ key }, { onConflict: "user_id,key" }).select("key"));
+}
+
+// ───────────────────────────── savings prompts + transfers (§7.1, §7.2) ─────────────────────────────
+
+export async function getSavingsPrompts() {
+  const { db, today } = await authed();
+  const { thirdPaychequePrompt, monthEndPrompt } = await import("./savings-prompts");
+  const [income, prof, dismissed] = await Promise.all([incomeSettings(db), profile(db), dismissedKeys(db)]);
+  const out = [];
+  if (income) {
+    const p = thirdPaychequePrompt(income.schedule, income.paycheque, today);
+    if (p && !dismissed.has(p.key)) out.push(p);
+  }
+  // Month-end: this month near its end, or last month during the first 5 days.
+  const day = Number(today.slice(8));
+  const month = day <= 5 ? monthKey(addMonths(today, -1)) : monthKey(today);
+  const { end } = monthRange(month);
+  if (day <= 5 || Date.parse(end) - Date.parse(today) <= 2 * 86_400_000) {
+    const cats = await categories(db);
+    const [rows, lines] = await Promise.all([monthLedger(db, month, cats), budgetLines(db, month)]);
+    const status = budgetStatus(lines, spentByCategory(rows));
+    const p = monthEndPrompt(month, status.spent, prof.monthlyBudget ?? status.budget, today);
+    if (p && !dismissed.has(p.key)) out.push(p);
+  }
+  return out;
+}
+
+/** Records chequing → savings as a linked transfer pair (not spending), and marks the prompt done. */
+export async function moveToSavings(amountCents: number, promptKey?: string) {
+  const { db, today } = await authed();
+  if (!Number.isInteger(amountCents) || amountCents <= 0) throw new Error("Enter an amount.");
+  const [accts, cat] = await Promise.all([
+    db.from("accounts").select("id,key").in("key", ["scotia_chequing", "scotia_savings"]).then(ok),
+    db.from("categories").select("id").eq("key", "savings_xfer").maybeSingle().then(okMaybe),
+  ]);
+  const from = accts.find((a) => a.key === "scotia_chequing");
+  const to = accts.find((a) => a.key === "scotia_savings");
+  if (!from || !to) throw new Error("Chequing or savings account not found.");
+  const [out] = ok(
+    await db
+      .from("transactions")
+      .insert({ account_id: from.id, date: today, amount_cents: -amountCents, description: "To savings", category_id: cat?.id ?? null, is_transfer: true, source: "manual" })
+      .select("id"),
+  );
+  const [inn] = ok(
+    await db
+      .from("transactions")
+      .insert({ account_id: to.id, date: today, amount_cents: amountCents, description: "From chequing", category_id: cat?.id ?? null, is_transfer: true, source: "manual", transfer_pair_id: out.id })
+      .select("id"),
+  );
+  ok(await db.from("transactions").update({ transfer_pair_id: inn.id }).eq("id", out.id).select("id"));
+  if (promptKey) await dismiss(promptKey);
+}
+
+// ───────────────────────────── savings goals (§7.8) ─────────────────────────────
+
+export async function getGoals() {
+  const { db } = await authed();
+  const [goals, bal] = await Promise.all([
+    db.from("savings_goals").select("id,name,target_cents,monthly_contribution_cents,account_id,archived,created_at").eq("archived", false).order("created_at").then(ok),
+    balances(db),
+  ]);
+  const savingsAccounts = bal.filter((b) => b.account_group === "cash_bank" && /savings/i.test(b.name));
+  return {
+    goals: goals.map((g) => {
+      const linked = g.account_id ? bal.find((b) => b.account_id === g.account_id) : undefined;
+      // The emergency fund stays private: progress is shown without its amount.
+      const saved = linked && linked.account_group !== "cash_emergency" ? Math.max(0, linked.balance_cents) : null;
+      return {
+        id: g.id,
+        name: g.name,
+        target: Number(g.target_cents),
+        monthly: Number(g.monthly_contribution_cents),
+        accountId: g.account_id,
+        account: linked?.name ?? null,
+        saved,
+      };
+    }),
+    accounts: savingsAccounts.map((a) => ({ id: a.account_id, name: a.name })),
+  };
+}
+
+export async function saveGoal(g: { id?: string; name: string; targetCents: number; monthlyCents: number; accountId: string | null }) {
+  const { db } = await authed();
+  const name = g.name.trim().slice(0, 60);
+  if (!name) throw new Error("Name the goal.");
+  if (!Number.isInteger(g.targetCents) || g.targetCents <= 0) throw new Error("Enter a target.");
+  if (!Number.isInteger(g.monthlyCents) || g.monthlyCents < 0) throw new Error("Enter a monthly amount.");
+  const row = { name, target_cents: g.targetCents, monthly_contribution_cents: g.monthlyCents, account_id: g.accountId };
+  if (g.id) ok(await db.from("savings_goals").update(row).eq("id", g.id).select("id"));
+  else ok(await db.from("savings_goals").insert(row).select("id"));
+}
+
+export async function deleteGoal(id: string) {
+  const { db } = await authed();
+  ok(await db.from("savings_goals").delete().eq("id", id).select("id"));
+}
