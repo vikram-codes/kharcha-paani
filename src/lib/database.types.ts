@@ -44,9 +44,11 @@ export type Database = {
           account_group: string
           apr: number | null
           archived: boolean
+          borrowed_native: number | null
           created_at: string
           credit_limit_cents: number | null
           currency: string
+          emi_native: number | null
           hidden: boolean
           id: string
           institution: string | null
@@ -64,9 +66,11 @@ export type Database = {
           account_group: string
           apr?: number | null
           archived?: boolean
+          borrowed_native?: number | null
           created_at?: string
           credit_limit_cents?: number | null
           currency?: string
+          emi_native?: number | null
           hidden?: boolean
           id?: string
           institution?: string | null
@@ -84,9 +88,11 @@ export type Database = {
           account_group?: string
           apr?: number | null
           archived?: boolean
+          borrowed_native?: number | null
           created_at?: string
           credit_limit_cents?: number | null
           currency?: string
+          emi_native?: number | null
           hidden?: boolean
           id?: string
           institution?: string | null

@@ -482,7 +482,7 @@ async function getLoanFor(db: Db, today: ISODate, bal: Balance[]) {
   const acct = bal.find((b) => b.key === "student_loan");
   if (!acct) return null;
   const [meta, snap, cat] = await Promise.all([
-    db.from("accounts").select("apr,monthly_payment_cents").eq("id", acct.account_id).single().then(ok),
+    db.from("accounts").select("apr,monthly_payment_cents,borrowed_native,emi_native").eq("id", acct.account_id).single().then(ok),
     db.from("balance_snapshots").select("as_of,amount_cents,native_amount,fx_rate")
       .eq("account_id", acct.account_id).order("as_of", { ascending: false }).limit(1).single().then(ok),
     db.from("categories").select("id").eq("key", "student_loan").maybeSingle().then(okMaybe),
@@ -501,6 +501,26 @@ async function getLoanFor(db: Db, today: ISODate, bal: Balance[]) {
   const apr = Number(meta.apr ?? 0);
   const state = loanState({ anchorOwed: -Number(snap.amount_cents), anchorDate: snap.as_of, aprPct: apr, payments, today });
   const monthlyPayment = Number(meta.monthly_payment_cents ?? 0);
+  const fx = snap.fx_rate != null ? Number(snap.fx_rate) : null;
+  const emiInr = meta.emi_native != null ? Number(meta.emi_native) : null;
+  const borrowedInr = meta.borrowed_native != null ? Number(meta.borrowed_native) : null;
+  // Interest charged to date, in rupees: owed now − borrowed + repaid (each EMI
+  // recorded counts as one rupee EMI; the first EMI was Oct 2026).
+  const interest =
+    fx && borrowedInr && emiInr
+      ? (() => {
+          const owedInr = Math.round((state.owed / 100) * fx);
+          const repaidInr = payments.length * emiInr;
+          return {
+            borrowedInr,
+            repaidInr,
+            owedInr,
+            chargedInr: owedInr - borrowedInr + repaidInr,
+            perMonthInr: Math.round((state.nextInterest / 100) * fx),
+            fx,
+          };
+        })()
+      : null;
   return {
     name: acct.name,
     owed: state.owed,
@@ -515,6 +535,8 @@ async function getLoanFor(db: Db, today: ISODate, bal: Balance[]) {
     inr: snap.native_amount != null ? -Number(snap.native_amount) : null,
     fxRate: snap.fx_rate != null ? Number(snap.fx_rate) : null,
     anchorDate: snap.as_of as ISODate,
+    emiInr,
+    interest,
   };
 }
 

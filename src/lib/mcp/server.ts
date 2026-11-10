@@ -205,6 +205,13 @@ export function registerTools(server: McpServer) {
             monthly_emi: $(loan.monthlyPayment),
             goes_to_principal: $(loan.toPrincipal),
             payoff_month: loan.payoff,
+            in_rupees: loan.interest && {
+              borrowed: loan.interest.borrowedInr,
+              repaid: loan.interest.repaidInr,
+              owed_now: loan.interest.owedInr,
+              interest_charged_to_date: loan.interest.chargedInr,
+              interest_per_month_now: loan.interest.perMonthInr,
+            },
           },
         });
       } catch (e) {
