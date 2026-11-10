@@ -101,4 +101,6 @@ export const transferTitle = (r: FeedRow) =>
 export const transferSubtitle = (r: FeedRow) => "Transfer" + (r.note ? ` · ${r.note}` : "");
 
 /** Spending only (money out, not transfers). */
-export const spentOf = (rows: ActivityRow[]) => rows.filter((r) => !r.isTransfer && r.amount_cents < 0).reduce((t, r) => t - r.amount_cents, 0);
+/** Money out, less any part a friend owes you back. */
+export const spentOf = (rows: ActivityRow[]) =>
+  rows.filter((r) => !r.isTransfer && r.amount_cents < 0).reduce((t, r) => t - r.amount_cents - r.owed.reduce((s, o) => s + o.amount_cents, 0), 0);

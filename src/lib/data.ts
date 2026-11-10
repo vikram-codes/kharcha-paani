@@ -9,6 +9,7 @@ import { budgetBand, budgetStatus, type BudgetLineDef } from "./budget";
 import { needsAdding, openOccurrence, OVERDUE_GRACE_DAYS, type LedgerHit } from "./bill-due";
 import { addDays, addMonths, monthKey, monthRange, todayISO, type ISODate, type MonthKey } from "./dates";
 import { loanState, payoffMonth } from "./loan";
+import { allocateCents } from "./money";
 import { nextPayday, type HolidayRule } from "./paydays";
 import { summarize, type CategoryInfo, type TxRow } from "./summary";
 
@@ -130,7 +131,7 @@ async function ledger(db: Db, start: ISODate, end: ISODate, cats: Map<string, Ca
   const page = (from: number) =>
     db
       .from("ledger_lines")
-      .select("line_id,date,report_on,description,note,amount_cents,is_transfer,in_reports,category_id,account_id,is_split")
+      .select("line_id,transaction_id,date,report_on,description,note,amount_cents,is_transfer,in_reports,category_id,account_id,is_split")
       .gte("report_on", start)
       .lte("report_on", end)
       .order("report_on", { ascending: false })
@@ -145,11 +146,21 @@ async function ledger(db: Db, start: ISODate, end: ISODate, cats: Map<string, Ca
   }
   const accountName = new Map(accounts.map((a) => [a.id, a.name]));
   // Money a friend owes you on a transaction isn't your spending (§6): take it off that line.
-  const txIds = [...new Set(rows.filter((r) => !r.is_split && Number(r.amount_cents) < 0).map((r) => r.line_id!))];
+  const txIds = [...new Set(rows.filter((r) => Number(r.amount_cents) < 0).map((r) => r.transaction_id!))];
   const owedByTx = new Map<string, number>();
   for (let i = 0; i < txIds.length; i += 300) {
     const part = ok(await db.from("shared_debts").select("transaction_id,amount_cents").in("transaction_id", txIds.slice(i, i + 300)));
     for (const o of part) owedByTx.set(o.transaction_id!, (owedByTx.get(o.transaction_id!) ?? 0) + Number(o.amount_cents));
+  }
+  // On a split transaction, the friend's part comes off its spending lines in proportion.
+  const owedByLine = new Map<string, number>();
+  const splitTx = [...new Set(rows.filter((r) => r.is_split && owedByTx.has(r.transaction_id!)).map((r) => r.transaction_id!))];
+  if (splitTx.length) {
+    const lines = ok(await db.from("transaction_splits").select("id,transaction_id,amount_cents").in("transaction_id", splitTx).lt("amount_cents", 0));
+    for (const t of splitTx) {
+      const mine = lines.filter((l) => l.transaction_id === t).map((l) => ({ id: l.id, cents: -Number(l.amount_cents) }));
+      if (mine.length) allocateCents(owedByTx.get(t)!, mine.map((m) => m.cents)).forEach((c, i) => owedByLine.set(mine[i].id, c));
+    }
   }
   return rows.map((r) => ({
     id: r.line_id!,
@@ -158,7 +169,7 @@ async function ledger(db: Db, start: ISODate, end: ISODate, cats: Map<string, Ca
     description: r.is_split && r.note ? `${r.description} · ${r.note}` : (r.description ?? ""),
     account: accountName.get(r.account_id!) ?? "",
     split: Boolean(r.is_split),
-    amount_cents: Number(r.amount_cents) + (r.is_split ? 0 : (owedByTx.get(r.line_id!) ?? 0)),
+    amount_cents: Number(r.amount_cents) + (r.is_split ? (owedByLine.get(r.line_id!) ?? 0) : Number(r.amount_cents) < 0 ? (owedByTx.get(r.line_id!) ?? 0) : 0),
     is_transfer: Boolean(r.is_transfer),
     in_reports: Boolean(r.in_reports),
     category: r.category_id ? (cats.get(r.category_id) ?? null) : null,
@@ -483,56 +494,67 @@ async function getLoanFor(db: Db, today: ISODate, bal: Balance[]) {
   if (!acct) return null;
   const [meta, snap, cat] = await Promise.all([
     db.from("accounts").select("apr,monthly_payment_cents,borrowed_native,emi_native").eq("id", acct.account_id).single().then(ok),
-    db.from("balance_snapshots").select("as_of,amount_cents,native_amount,fx_rate")
-      .eq("account_id", acct.account_id).order("as_of", { ascending: false }).limit(1).single().then(ok),
+    db.from("balance_snapshots").select("as_of,amount_cents,native_amount,fx_rate,created_at")
+      .eq("account_id", acct.account_id).order("as_of", { ascending: false }).order("created_at", { ascending: false }).limit(1).single().then(ok),
     db.from("categories").select("id").eq("key", "student_loan").maybeSingle().then(okMaybe),
   ]);
-  let payments: { date: ISODate; cents: number }[] = [];
+  // A payment recorded after the balance was set on the same day still counts.
+  let payments: { date: ISODate; cents: number; afterAnchor: boolean }[] = [];
   if (cat) {
     const [direct, splits] = await Promise.all([
-      db.from("transactions").select("date,amount_cents").eq("category_id", cat.id).then(ok),
-      db.from("transaction_splits").select("amount_cents,transaction:transactions(date)").eq("category_id", cat.id).then(ok),
+      db.from("transactions").select("date,amount_cents,created_at").eq("category_id", cat.id).then(ok),
+      db.from("transaction_splits").select("amount_cents,transaction:transactions(date,created_at)").eq("category_id", cat.id).then(ok),
     ]);
+    const after = (createdAt: string) => createdAt > snap.created_at;
     payments = [
-      ...direct.map((p) => ({ date: p.date as ISODate, cents: -Number(p.amount_cents) })),
-      ...splits.filter((s) => s.transaction).map((s) => ({ date: s.transaction!.date as ISODate, cents: -Number(s.amount_cents) })),
+      ...direct.map((p) => ({ date: p.date as ISODate, cents: -Number(p.amount_cents), afterAnchor: after(p.created_at) })),
+      ...splits
+        .filter((s) => s.transaction)
+        .map((s) => ({ date: s.transaction!.date as ISODate, cents: -Number(s.amount_cents), afterAnchor: after(s.transaction!.created_at) })),
     ].sort((a, b) => (a.date < b.date ? -1 : 1));
   }
   const apr = Number(meta.apr ?? 0);
-  const state = loanState({ anchorOwed: -Number(snap.amount_cents), anchorDate: snap.as_of, aprPct: apr, payments, today });
   const monthlyPayment = Number(meta.monthly_payment_cents ?? 0);
   const fx = snap.fx_rate != null ? Number(snap.fx_rate) : null;
   const emiInr = meta.emi_native != null ? Number(meta.emi_native) : null;
   const borrowedInr = meta.borrowed_native != null ? Number(meta.borrowed_native) : null;
+  const anchorInr = snap.native_amount != null ? -Number(snap.native_amount) : null;
+  // The loan lives in rupees: each EMI recorded takes one rupee EMI off the
+  // moment it's entered (owner, Nov 10 2026), interest compounds in rupees,
+  // and CAD is that balance at the snapshot's rate.
+  const rupees = fx && emiInr && anchorInr != null;
+  const state = rupees
+    ? loanState({ anchorOwed: anchorInr * 100, anchorDate: snap.as_of, aprPct: apr, payments: payments.map((p) => ({ ...p, cents: emiInr * 100 })), today })
+    : loanState({ anchorOwed: -Number(snap.amount_cents), anchorDate: snap.as_of, aprPct: apr, payments, today });
+  const toCad = (paise: number) => (rupees ? Math.round(paise / fx) : paise);
+  const owed = toCad(state.owed);
+  const nextInterest = toCad(state.nextInterest);
+  const owedInr = rupees ? Math.round(state.owed / 100) : null;
   // Interest charged to date, in rupees: owed now − borrowed + repaid (each EMI
   // recorded counts as one rupee EMI; the first EMI was Oct 2026).
   const interest =
-    fx && borrowedInr && emiInr
-      ? (() => {
-          const owedInr = Math.round((state.owed / 100) * fx);
-          const repaidInr = payments.length * emiInr;
-          return {
-            borrowedInr,
-            repaidInr,
-            owedInr,
-            chargedInr: owedInr - borrowedInr + repaidInr,
-            perMonthInr: Math.round((state.nextInterest / 100) * fx),
-            fx,
-          };
-        })()
+    rupees && borrowedInr && owedInr != null
+      ? {
+          borrowedInr,
+          repaidInr: payments.length * emiInr,
+          owedInr,
+          chargedInr: owedInr - borrowedInr + payments.length * emiInr,
+          perMonthInr: Math.round(state.nextInterest / 100),
+          fx,
+        }
       : null;
   return {
     name: acct.name,
-    owed: state.owed,
+    owed,
     paid: payments.reduce((s, p) => s + p.cents, 0),
     payments: payments.slice().reverse(),
     apr,
-    nextInterest: state.nextInterest,
+    nextInterest,
     nextInterestDate: state.nextInterestDate,
     monthlyPayment,
-    toPrincipal: monthlyPayment - state.nextInterest,
-    payoff: payoffMonth(state.owed, apr, monthlyPayment, today),
-    inr: snap.native_amount != null ? -Number(snap.native_amount) : null,
+    toPrincipal: monthlyPayment - nextInterest,
+    payoff: payoffMonth(owed, apr, monthlyPayment, today),
+    inr: owedInr ?? anchorInr,
     fxRate: snap.fx_rate != null ? Number(snap.fx_rate) : null,
     anchorDate: snap.as_of as ISODate,
     emiInr,
@@ -839,6 +861,38 @@ export async function activityData(month?: MonthKey) {
   return { month: m, today, current: monthKey(today), rows: toActivityRows(rows, cats), upcoming: bills };
 }
 
+/**
+ * Search across every month: merchant/description, note, category (including
+ * split lines) or account name. Newest first, up to 200 transactions.
+ */
+export async function searchActivity(query: string) {
+  const { db, today } = await authed();
+  // Characters that would break PostgREST's filter syntax are dropped.
+  const q = query.replace(/[%_,()*\\"'.:]/g, " ").trim().slice(0, 60);
+  if (q.length < 2) return { today, rows: [] as ActivityRow[], more: false };
+  const like = `%${q}%`;
+  const cats = await categories(db);
+  const [catHits, acctHits] = await Promise.all([
+    db.from("categories").select("id").ilike("name", like).then(ok),
+    db.from("accounts").select("id").ilike("name", like).then(ok),
+  ]);
+  const catIds = catHits.map((c) => c.id);
+  const LIMIT = 200;
+  const splitTx = catIds.length
+    ? ok(await db.from("transaction_splits").select("transaction_id").in("category_id", catIds).limit(LIMIT)).map((s) => s.transaction_id)
+    : [];
+  const queries = [
+    activityQuery(db).or(`description.ilike."*${q}*",note.ilike."*${q}*"`).limit(LIMIT),
+    catIds.length ? activityQuery(db).in("category_id", catIds).limit(LIMIT) : null,
+    acctHits.length ? activityQuery(db).in("account_id", acctHits.map((a) => a.id)).limit(LIMIT) : null,
+    splitTx.length ? activityQuery(db).in("id", [...new Set(splitTx)]).limit(LIMIT) : null,
+  ].filter((x) => x !== null);
+  const seen = new Map<string, ActivityDbRow>();
+  for (const rows of await Promise.all(queries.map((x) => x.then(ok)))) for (const r of rows) seen.set(r.id, r);
+  const rows = [...seen.values()].sort((a, b) => (a.date === b.date ? 0 : a.date < b.date ? 1 : -1));
+  return { today, rows: toActivityRows(rows.slice(0, LIMIT), cats), more: rows.length > LIMIT };
+}
+
 /** One account's page: balance, card details and its recent entries (newest first). */
 export async function getAccountDetail(id: string, limit = 80) {
   const { db, today } = await authed();
@@ -895,13 +949,22 @@ export async function getEditOptions() {
 
 export type TransactionPatch = { amountCents: number; categoryId: string | null; accountId: string; date: ISODate; note: string | null };
 
-/** Edits a transaction. The sign of amountCents is the direction (negative = money out / card purchase). */
-export async function updateTransaction(id: string, patch: TransactionPatch) {
+/** Thrown when a split transaction's amount changes without new split lines. */
+export const SPLIT_NEEDS_UPDATE = "This transaction is split. Update the split to match the new amount.";
+
+export type SplitLine = { categoryId: string; cents: number };
+
+/**
+ * Edits a transaction. The sign of amountCents is the direction (negative = money out / card purchase).
+ * A split transaction whose amount changes needs `splits` (positive, adding up to the new amount).
+ * The other leg of a transfer follows: same date and note, opposite amount.
+ */
+export async function updateTransaction(id: string, patch: TransactionPatch, splits?: SplitLine[]) {
   const { db } = await authed();
   if (!Number.isInteger(patch.amountCents) || patch.amountCents === 0 || Math.abs(patch.amountCents) > 100_000_000) throw new Error("Enter an amount.");
   if (!/^\d{4}-\d{2}-\d{2}$/.test(patch.date)) throw new Error("Pick a valid date.");
   const [tx, category, account] = await Promise.all([
-    db.from("transactions").select("id,account_id,transaction_splits(id)").eq("id", id).maybeSingle().then(okMaybe),
+    db.from("transactions").select("id,account_id,amount_cents,is_transfer,transfer_pair_id,transaction_splits(id)").eq("id", id).maybeSingle().then(okMaybe),
     patch.categoryId ? db.from("categories").select("id,kind").eq("id", patch.categoryId).maybeSingle().then(okMaybe) : Promise.resolve(null),
     db.from("accounts").select("id").eq("id", patch.accountId).maybeSingle().then(okMaybe),
   ]);
@@ -909,6 +972,10 @@ export async function updateTransaction(id: string, patch: TransactionPatch) {
   if (patch.categoryId && !category) throw new Error("Choose a category.");
   if (!account) throw new Error("Choose an account.");
   const split = tx.transaction_splits.length > 0;
+  const amountChanged = Number(tx.amount_cents) !== patch.amountCents;
+  // Check the new split lines before writing anything.
+  const lines = split && amountChanged ? checkSplitLines(splits, Math.abs(patch.amountCents)) : null;
+  const note = patch.note?.trim().slice(0, 200) || null;
   ok(
     await db
       .from("transactions")
@@ -916,19 +983,49 @@ export async function updateTransaction(id: string, patch: TransactionPatch) {
         amount_cents: patch.amountCents,
         account_id: account.id,
         date: patch.date,
-        note: patch.note?.trim().slice(0, 200) || null,
+        note,
         // A split transaction's categories live on its split lines.
-        ...(split ? {} : { category_id: category?.id ?? null, is_transfer: category?.kind === "transfer" }),
+        // A linked transfer leg stays a transfer; uncategorized keeps what it was.
+        ...(split
+          ? {}
+          : { category_id: category?.id ?? null, is_transfer: tx.transfer_pair_id ? true : category ? category.kind === "transfer" : tx.is_transfer }),
       })
       .eq("id", id)
       .select("id"),
   );
+  if (lines) await replaceSplits(db, id, Math.sign(patch.amountCents), lines);
+  // The other leg of a transfer moves with it, so both accounts stay in step.
+  if (tx.transfer_pair_id) {
+    ok(await db.from("transactions").update({ amount_cents: -patch.amountCents, date: patch.date, note }).eq("id", tx.transfer_pair_id).select("id"));
+  }
 }
 
+/** Split lines must be 2+, each with a category and a positive amount, adding up to `total`. */
+function checkSplitLines(lines: SplitLine[] | undefined, total: number): SplitLine[] {
+  if (!lines) throw new Error(SPLIT_NEEDS_UPDATE);
+  const clean = lines.filter((l) => l.cents > 0);
+  if (clean.length < 2) throw new Error("A split needs at least two lines.");
+  if (clean.some((l) => !Number.isInteger(l.cents) || !l.categoryId)) throw new Error("Each line needs a category and an amount.");
+  const sum = clean.reduce((t, l) => t + l.cents, 0);
+  if (sum !== total) throw new Error(`Lines add up to ${(sum / 100).toFixed(2)}, not ${(total / 100).toFixed(2)}.`);
+  return clean;
+}
+
+async function replaceSplits(db: Db, transactionId: string, sign: number, lines: SplitLine[]) {
+  ok(await db.from("transaction_splits").delete().eq("transaction_id", transactionId).select("id"));
+  ok(await db.from("transaction_splits").insert(lines.map((l) => ({ transaction_id: transactionId, category_id: l.categoryId, amount_cents: sign * l.cents }))).select("id"));
+}
+
+/** Deletes a transaction, and the other leg too when it's a transfer. */
 export async function deleteTransaction(id: string) {
   const { db } = await authed();
-  const rows = ok(await db.from("transactions").delete().eq("id", id).select("id"));
-  if (!rows.length) throw new Error("Transaction not found.");
+  const tx = okMaybe(await db.from("transactions").select("id,transfer_pair_id").eq("id", id).maybeSingle());
+  if (!tx) throw new Error("Transaction not found.");
+  // Either leg may point at the other (older pairs only link one way).
+  const legs = ok(await db.from("transactions").select("id").or(`id.eq.${id},transfer_pair_id.eq.${id}${tx.transfer_pair_id ? `,id.eq.${tx.transfer_pair_id}` : ""}`));
+  const ids = legs.map((l) => l.id);
+  ok(await db.from("transactions").delete().in("id", ids).select("id"));
+  return ids;
 }
 
 // ───────────────────────────── statement import (§4.3) ─────────────────────────────
@@ -1565,15 +1662,8 @@ export async function saveSplits(transactionId: string, lines: { categoryId: str
   const { db } = await authed();
   const tx = okMaybe(await db.from("transactions").select("id,amount_cents").eq("id", transactionId).maybeSingle());
   if (!tx) throw new Error("Transaction not found.");
-  const total = Math.abs(Number(tx.amount_cents));
-  const clean = lines.filter((l) => l.cents > 0);
-  if (clean.length < 2) throw new Error("A split needs at least two lines.");
-  if (clean.some((l) => !Number.isInteger(l.cents) || !l.categoryId)) throw new Error("Each line needs a category and an amount.");
-  const sum = clean.reduce((t, l) => t + l.cents, 0);
-  if (sum !== total) throw new Error(`Lines add up to ${(sum / 100).toFixed(2)}, not ${(total / 100).toFixed(2)}.`);
-  const sign = Number(tx.amount_cents) < 0 ? -1 : 1;
-  ok(await db.from("transaction_splits").delete().eq("transaction_id", tx.id).select("id"));
-  ok(await db.from("transaction_splits").insert(clean.map((l) => ({ transaction_id: tx.id, category_id: l.categoryId, amount_cents: sign * l.cents }))).select("id"));
+  const clean = checkSplitLines(lines, Math.abs(Number(tx.amount_cents)));
+  await replaceSplits(db, tx.id, Number(tx.amount_cents) < 0 ? -1 : 1, clean);
   ok(await db.from("transactions").update({ category_id: null }).eq("id", tx.id).select("id"));
 }
 
@@ -1784,7 +1874,7 @@ export async function getTransactionBrief(id: string) {
   const t = okMaybe(
     await db
       .from("transactions")
-      .select("id,date,amount_cents,description,note,category_id,account_id,is_transfer,source,account:accounts!transactions_account_id_fkey(name),category:categories(name),transaction_splits(id)")
+      .select("id,date,amount_cents,description,note,category_id,account_id,is_transfer,source,transfer_pair_id,account:accounts!transactions_account_id_fkey(name),category:categories(name),transaction_splits(id)")
       .eq("id", id)
       .maybeSingle(),
   );
@@ -1792,6 +1882,7 @@ export async function getTransactionBrief(id: string) {
   return {
     id: t.id,
     date: t.date as ISODate,
+    transferPairId: t.transfer_pair_id,
     amount_cents: Number(t.amount_cents),
     description: t.description,
     note: t.note,

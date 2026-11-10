@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { ArrowLeftRight, ChevronLeft, ChevronRight, Search, Split } from "lucide-react";
-import { loadActivity } from "@/app/actions/activity";
+import { loadActivity, searchTransactions } from "@/app/actions/activity";
 import { onDataChanged } from "@/lib/data-events";
 import { AddBillBadge } from "@/components/bills/add-bill-badge";
 import { CategoryChip } from "@/components/category-icon";
@@ -73,18 +73,31 @@ export function TransactionsView({ initial, firstMonth }: { initial: Activity; f
   // Anything saved elsewhere (quick-add, imports, Claude via refresh) → reload this month.
   useEffect(() => onDataChanged(refresh), []);
 
+  // Search looks through every month (owner, Nov 10 2026). Until the results
+  // arrive, this month's matches show straight away.
+  const needle = q.trim().toLowerCase();
+  const [found, setFound] = useState<{ q: string; rows: ActivityRow[]; more: boolean } | null>(null);
+  useEffect(() => {
+    if (needle.length < 2) return;
+    const t = setTimeout(() => {
+      searchTransactions(needle).then((res) => setFound({ q: needle, rows: res.rows, more: res.more }));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [needle, reload]);
+  const results = needle.length >= 2 && found?.q === needle ? found : null;
+  const searching = needle.length >= 2 && !results;
+
   const list = useMemo(() => {
-    const needle = q.trim().toLowerCase();
     // Each transfer once, read from chequing's side (owner, Nov 10 2026).
-    return mergeTransfers(shown.rows).filter((r) => {
+    return mergeTransfers(results ? results.rows : shown.rows).filter((r) => {
       if (!showTransfers && r.isTransfer) return false;
       if (filter === "cards" && r.accountGroup !== "debt_card") return false;
       if (filter === "chequing" && !/chequing/i.test(r.account)) return false;
       if (filter === "in" && (r.flow ?? r.amount_cents) <= 0) return false;
-      if (!needle) return true;
+      if (!needle || results) return true;
       return [r.description, r.note ?? "", r.category?.name ?? "", r.account, rowTitle(r)].some((s) => s.toLowerCase().includes(needle));
     });
-  }, [shown.rows, q, filter, showTransfers]);
+  }, [shown.rows, results, needle, filter, showTransfers]);
 
   const days = useMemo(() => {
     const m = new Map<string, FeedRow[]>();
@@ -93,6 +106,9 @@ export function TransactionsView({ initial, firstMonth }: { initial: Activity; f
   }, [list]);
 
   const loading = shown.month !== urlMonth;
+  const thisYear = shown.today.slice(0, 4);
+  const dayLabel = (day: string) =>
+    day === shown.today ? "Today" : day.slice(0, 4) === thisYear ? formatDay(day) : `${formatDay(day)}, ${day.slice(0, 4)}`;
   const prev = urlMonth > firstMonth ? shiftMonth(urlMonth, -1) : null;
   const next = urlMonth < initial.current ? shiftMonth(urlMonth, 1) : null;
   const navBtn = "grid size-10 shrink-0 place-items-center rounded-xl bg-surface-1 transition-colors duration-(--duration-fast) hover:bg-surface-2 disabled:pointer-events-none disabled:opacity-30";
@@ -100,7 +116,7 @@ export function TransactionsView({ initial, firstMonth }: { initial: Activity; f
   return (
     <div className="flex flex-col gap-4">
       <div className="pointer-events-none fixed inset-x-0 top-0 z-50 h-0.5 overflow-hidden" aria-hidden>
-        <div className={cn("h-full w-1/3 bg-lime transition-opacity duration-200", loading ? "animate-[kp-progress_0.9s_ease-in-out_infinite] opacity-100" : "opacity-0")} />
+        <div className={cn("h-full w-1/3 bg-lime transition-opacity duration-200", loading || searching ? "animate-[kp-progress_0.9s_ease-in-out_infinite] opacity-100" : "opacity-0")} />
       </div>
 
       <header className="flex items-center justify-between gap-3">
@@ -108,9 +124,15 @@ export function TransactionsView({ initial, firstMonth }: { initial: Activity; f
           <ChevronLeft className="size-5" />
         </button>
         <div className="min-w-0 text-center">
-          <h1 className="truncate text-lg font-semibold tracking-tight">{formatMonth(urlMonth)}</h1>
+          <h1 className="truncate text-lg font-semibold tracking-tight">{needle.length >= 2 ? "All months" : formatMonth(urlMonth)}</h1>
           <p className="num text-xs text-muted-foreground">
-            {shown.month === urlMonth ? `${shown.rows.length} transactions · −${formatCents(spentOf(shown.rows), { whole: true })} spent` : "Loading…"}
+            {needle.length >= 2
+              ? results
+                ? `${list.length}${results.more ? "+" : ""} result${list.length === 1 ? "" : "s"} for “${q.trim()}”`
+                : "Searching every month…"
+              : shown.month === urlMonth
+                ? `${shown.rows.length} transactions · −${formatCents(spentOf(shown.rows), { whole: true })} spent`
+                : "Loading…"}
           </p>
         </div>
         <button type="button" className={navBtn} disabled={!next} onClick={() => go(next)} aria-label="Next month">
@@ -121,7 +143,7 @@ export function TransactionsView({ initial, firstMonth }: { initial: Activity; f
       <div className="flex flex-col gap-2">
         <label className="flex h-11 items-center gap-2 rounded-xl bg-surface-1 px-3 ring-1 ring-border focus-within:ring-2 focus-within:ring-lime">
           <Search className="size-4 text-muted-foreground" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search merchant, category, note" className="h-full flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search all months: merchant, category, note" className="h-full flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/70" />
         </label>
         <div className="flex gap-1.5 overflow-x-auto pb-0.5">
           {FILTERS.map((x) => (
@@ -145,7 +167,7 @@ export function TransactionsView({ initial, firstMonth }: { initial: Activity; f
       </div>
 
       <div className={cn("flex flex-col gap-4 transition-opacity duration-200", loading && "opacity-50")} aria-busy={loading}>
-        {shown.upcoming.length > 0 && (
+        {shown.upcoming.length > 0 && needle.length < 2 && (
           <section>
             <h2 className="mb-1 px-1 text-xs font-medium tracking-wider text-muted-foreground uppercase">Upcoming</h2>
             <div className="rounded-2xl border border-dashed border-border px-3">
@@ -167,7 +189,7 @@ export function TransactionsView({ initial, firstMonth }: { initial: Activity; f
         {days.map(([day, rows]) => (
           <section key={day}>
             <div className="sticky top-0 z-10 -mx-1 flex items-baseline justify-between bg-background/90 px-2 py-1.5 backdrop-blur">
-              <span className="text-xs font-medium tracking-wider text-muted-foreground uppercase">{day === shown.today ? "Today" : formatDay(day)}</span>
+              <span className="text-xs font-medium tracking-wider text-muted-foreground uppercase">{dayLabel(day)}</span>
               {spentOf(rows) > 0 && <span className="num text-xs text-muted-foreground">−{formatCents(spentOf(rows))}</span>}
             </div>
             <div className="divide-y divide-border rounded-2xl bg-surface-1 px-3">
@@ -188,7 +210,7 @@ export function TransactionsView({ initial, firstMonth }: { initial: Activity; f
           </section>
         ))}
         {!days.length && !loading && (
-          <p className="py-10 text-center text-sm text-muted-foreground">{q || filter !== "all" ? "No transactions match." : `Nothing recorded for ${formatMonth(urlMonth)}.`}</p>
+          <p className="py-10 text-center text-sm text-muted-foreground">{searching ? "Searching…" : q || filter !== "all" ? "No transactions match." : `Nothing recorded for ${formatMonth(urlMonth)}.`}</p>
         )}
       </div>
 

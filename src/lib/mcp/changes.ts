@@ -131,7 +131,7 @@ export async function draftDeleteTransactions(ids: string[]): Promise<DraftResul
   for (const id of ids) {
     const t = await getTransactionBrief(id);
     if (!t) return no(`Transaction ${id} not found.`);
-    lines.push(`Delete ${t.date} ${t.note || cleanMerchant(t.description)} ${money(t.amount_cents)} · ${t.category} · ${t.account}`);
+    lines.push(`Delete ${t.date} ${t.note || cleanMerchant(t.description)} ${money(t.amount_cents)} · ${t.category} · ${t.account}${t.transferPairId ? " (and the other side of this transfer)" : ""}`);
   }
   return draft({ kind: "delete_tx", ids }, lines);
 }
@@ -320,9 +320,12 @@ export async function applyChange(raw: unknown): Promise<string> {
     case "edit_tx":
       await updateTransaction(c.id, c.patch);
       return "Transaction updated";
-    case "delete_tx":
-      for (const id of c.ids) await deleteTransaction(id);
-      return `Deleted ${c.ids.length} transaction${c.ids.length === 1 ? "" : "s"}`;
+    case "delete_tx": {
+      // Deleting one transfer leg removes its pair too: skip ids already gone.
+      const gone = new Set<string>();
+      for (const id of c.ids) if (!gone.has(id)) for (const d of await deleteTransaction(id)) gone.add(d);
+      return `Deleted ${gone.size} transaction${gone.size === 1 ? "" : "s"}`;
+    }
     case "split_tx":
       await saveSplits(c.id, c.lines);
       return "Split saved";

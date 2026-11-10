@@ -20,6 +20,8 @@ import { formatCents, parseToCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 import { rowTitle } from "./format";
 
+type SplitLine = { categoryId: string; cents: number };
+
 type Options = Awaited<ReturnType<typeof loadEditOptions>>;
 
 const KIND_LABEL: Record<string, string> = {
@@ -113,17 +115,30 @@ function EditForm({
     cents = 0;
   }
 
-  const save = () => {
+  const signed = out ? -cents : cents;
+  // A split whose amount changes: ask how the split should change first (owner, Nov 10 2026).
+  const splitAmountChanged = row.splits.length > 0 && signed !== row.amount_cents;
+  const [askSplit, setAskSplit] = useState(false);
+
+  const save = (splits?: SplitLine[]) => {
     if (cents <= 0) return;
+    if (splitAmountChanged && !splits) return setAskSplit(true);
     startBusy(async () => {
-      const res = await saveTransaction(row.id, {
-        amountCents: out ? -cents : cents,
-        categoryId: categoryId || null,
-        accountId,
-        date,
-        note: note || null,
-      });
-      if (!res.ok) return void toast.error(res.error);
+      const res = await saveTransaction(
+        row.id,
+        {
+          amountCents: signed,
+          categoryId: categoryId || null,
+          accountId,
+          date,
+          note: note || null,
+        },
+        splits,
+      );
+      if (!res.ok) {
+        if (res.needsSplit) return setAskSplit(true);
+        return void toast.error(res.error);
+      }
       if (makeRule && categoryId && categoryId !== (row.category?.id ?? "")) {
         const r = await makeRuleAction(row.description, categoryId, applyPast);
         if (!r.ok) toast.error(r.error);
@@ -201,6 +216,7 @@ function EditForm({
           row={row}
           options={categoryOptions(opts)}
           total={cents}
+          onSaveWithAmount={splitAmountChanged ? (lines) => save(lines) : undefined}
           onDone={() => {
             onChanged();
             onClose();
@@ -288,34 +304,44 @@ function EditForm({
         />
       </label>
 
-      {row.amount_cents < 0 && !row.isTransfer && row.splits.length === 0 && (
+      {row.amount_cents < 0 && !row.isTransfer && (
         <FriendOwes row={row} onChanged={onChanged} />
       )}
 
-      <div className="grid grid-cols-[auto_1fr] gap-2">
-        <button
-          type="button"
-          onClick={remove}
-          disabled={busy}
-          className={cn(
-            "flex h-12 items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium transition-colors duration-(--duration-fast)",
-            confirmDelete
-              ? "bg-budget-over text-white"
-              : "bg-surface-1 text-budget-over",
-          )}
-        >
-          <Trash2 className="size-4" />{" "}
-          {confirmDelete ? "Tap to confirm" : "Delete"}
-        </button>
-        <button
-          type="button"
-          onClick={save}
-          disabled={busy || cents <= 0}
-          className="flex h-12 items-center justify-center rounded-xl bg-lime font-semibold text-on-lime transition-transform duration-(--duration-fast) active:scale-[0.98] disabled:opacity-40"
-        >
-          {busy ? <Loader2 className="size-5 animate-spin" /> : "Save"}
-        </button>
-      </div>
+      {askSplit ? (
+        <SplitChangeAlert
+          row={row}
+          total={cents}
+          busy={busy}
+          onCancel={() => setAskSplit(false)}
+          onConfirm={(lines) => save(lines)}
+        />
+      ) : (
+        <div className="grid grid-cols-[auto_1fr] gap-2">
+          <button
+            type="button"
+            onClick={remove}
+            disabled={busy}
+            className={cn(
+              "flex h-12 items-center justify-center gap-2 rounded-xl px-4 text-sm font-medium transition-colors duration-(--duration-fast)",
+              confirmDelete
+                ? "bg-budget-over text-white"
+                : "bg-surface-1 text-budget-over",
+            )}
+          >
+            <Trash2 className="size-4" />{" "}
+            {confirmDelete ? (row.isTransfer ? "Deletes both sides" : "Tap to confirm") : "Delete"}
+          </button>
+          <button
+            type="button"
+            onClick={() => save()}
+            disabled={busy || cents <= 0}
+            className="flex h-12 items-center justify-center rounded-xl bg-lime font-semibold text-on-lime transition-transform duration-(--duration-fast) active:scale-[0.98] disabled:opacity-40"
+          >
+            {busy ? <Loader2 className="size-5 animate-spin" /> : "Save"}
+          </button>
+        </div>
+      )}
       {row.source !== "manual" && (
         <p className="text-center text-[11px] text-muted-foreground">
           Imported from{" "}
@@ -414,12 +440,15 @@ function SplitEditor({
   row,
   options,
   total,
+  onSaveWithAmount,
   onDone,
   onCancel,
 }: {
   row: ActivityRow;
   options: SelectOption[];
   total: number;
+  /** Set when the amount above changed: the split is saved together with it. */
+  onSaveWithAmount?: (lines: SplitLine[]) => void;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -447,16 +476,16 @@ function SplitEditor({
       return next;
     });
 
-  const save = () =>
+  const save = () => {
+    const out = lines.map((l) => ({ categoryId: l.categoryId ?? "", cents: toCents(l.amount) ?? 0 }));
+    if (onSaveWithAmount) return onSaveWithAmount(out);
     start(async () => {
-      const res = await saveSplitsAction(
-        row.id,
-        lines.map((l) => ({ categoryId: l.categoryId ?? "", cents: toCents(l.amount) ?? 0 })),
-      );
+      const res = await saveSplitsAction(row.id, out);
       if (!res.ok) return void toast.error(res.error);
       toast.success("Split saved");
       onDone();
     });
+  };
 
   const unsplit = () =>
     start(async () => {
@@ -494,6 +523,82 @@ function SplitEditor({
           className="flex h-10 items-center justify-center rounded-xl bg-lime text-sm font-semibold text-on-lime disabled:opacity-40"
         >
           {busy ? <Loader2 className="size-4 animate-spin" /> : "Save split"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The amount of a split transaction changed (owner, Nov 10 2026): ask before
+ * saving, and put the difference on the line you pick.
+ */
+function SplitChangeAlert({
+  row,
+  total,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  row: ActivityRow;
+  total: number;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: (lines: SplitLine[]) => void;
+}) {
+  const old = Math.abs(row.amount_cents);
+  const diff = total - old;
+  const lines = row.splits.map((s) => ({ categoryId: s.categoryId ?? "", name: s.name, cents: Math.abs(s.amount_cents) }));
+  const fits = (i: number) => lines[i].cents + diff > 0 && !!lines[i].categoryId;
+  // Default: the last line that can take it (e.g. "Send home" on a Remitly transfer, not the fixed EMI).
+  const [pick, setPick] = useState(() => {
+    for (let i = lines.length - 1; i >= 0; i--) if (fits(i)) return i;
+    return -1;
+  });
+  const next = lines.map((l, i) => ({ categoryId: l.categoryId, cents: i === pick ? l.cents + diff : l.cents }));
+
+  return (
+    <div role="alertdialog" aria-labelledby="split-change-title" className="flex flex-col gap-3 rounded-xl bg-surface-1 p-3 ring-1 ring-budget-high/60">
+      <div>
+        <p id="split-change-title" className="flex items-center gap-1.5 text-sm font-semibold">
+          <Split className="size-4 text-budget-high" /> Change the split too?
+        </p>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          This was split as {formatCents(old)}. The new amount is {formatCents(total)} ({formatCents(Math.abs(diff))} {diff > 0 ? "more" : "less"}). Put the
+          difference on:
+        </p>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {lines.map((l, i) => (
+          <label
+            key={i}
+            className={cn(
+              "flex cursor-pointer items-center gap-2.5 rounded-lg bg-surface-2 px-3 py-2 text-sm ring-1 ring-transparent",
+              pick === i && "ring-lime",
+              !fits(i) && "pointer-events-none opacity-40",
+            )}
+          >
+            <input type="radio" name="split-diff" checked={pick === i} disabled={!fits(i)} onChange={() => setPick(i)} className="accent-lime" />
+            <span className="min-w-0 flex-1 truncate">{l.name}</span>
+            <span className="num text-xs text-muted-foreground">
+              {formatCents(l.cents)}
+              {pick === i && <span className="font-medium text-foreground"> → {formatCents(l.cents + diff)}</span>}
+            </span>
+          </label>
+        ))}
+        {pick === -1 && <p className="text-xs text-budget-over">No line can take that difference. Edit the split lines above instead.</p>}
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <button type="button" onClick={onCancel} disabled={busy} className="h-11 rounded-xl bg-surface-2 text-sm">
+          Back
+        </button>
+        <button
+          type="button"
+          onClick={() => onConfirm(next)}
+          disabled={busy || pick === -1}
+          className="flex h-11 items-center justify-center rounded-xl bg-lime text-sm font-semibold text-on-lime disabled:opacity-40"
+        >
+          {busy ? <Loader2 className="size-4 animate-spin" /> : "Update split & save"}
         </button>
       </div>
     </div>

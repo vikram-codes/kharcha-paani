@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ActivityRow } from "@/lib/data";
-import { mergeTransfers, transferTitle } from "./format";
+import { mergeTransfers, spentOf, transferTitle } from "./format";
 
 let n = 0;
 const row = (p: Partial<ActivityRow>): ActivityRow => ({
@@ -66,5 +66,17 @@ describe("transfer flow (chequing's side)", () => {
   it("single legs: a bank leg keeps its sign, a card payment counts as money out", () => {
     expect(flows([leg({ amount_cents: 70038 })])).toEqual([70038]);
     expect(flows([leg({ amount_cents: 20000, account: "Costco CIBC Mastercard", accountGroup: "debt_card", accountId: "cibc" })])).toEqual([-20000]);
+  });
+});
+
+describe("spentOf", () => {
+  it("leaves out transfers, money in and the part a friend owes back", () => {
+    const rows = [
+      row({ id: "a", amount_cents: -6000, owed: [{ id: "o", person: "Sam", amount_cents: 3000, settled: false }] }),
+      row({ id: "b", amount_cents: -2000 }),
+      row({ id: "c", amount_cents: -100000, isTransfer: true }),
+      row({ id: "d", amount_cents: 5000 }),
+    ];
+    expect(spentOf(rows)).toBe(5000);
   });
 });

@@ -55,7 +55,7 @@ async function Loan() {
         </Ring>
         {l.inr != null && l.fxRate && (
           <p className="num mt-4 text-xs text-muted-foreground">
-            {inr.format(l.inr)} at ₹{l.fxRate} per CAD · as of {formatShort(l.anchorDate)}
+            {inr.format(l.inr)} owed · ₹{l.fxRate} per CAD
           </p>
         )}
       </section>

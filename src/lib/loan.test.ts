@@ -28,6 +28,12 @@ describe("student loan", () => {
     expect(s.owed).toBe(4_852_941);
   });
 
+  it("counts a payment on the anchor's day only when recorded after the balance was set", () => {
+    const anchorDay = { ...base, anchorDate: "2026-11-10" as const, today: "2026-11-10" as const };
+    expect(loanState({ ...anchorDay, payments: [{ date: "2026-11-10", cents: 55_000 }] }).owed).toBe(4_852_941);
+    expect(loanState({ ...anchorDay, payments: [{ date: "2026-11-10", cents: 55_000, afterAnchor: true }] }).owed).toBe(4_852_941 - 55_000);
+  });
+
   it("projects payoff around 12–13 years at $550/month", () => {
     const m = payoffMonth(4_852_941, 9.5, 55_000, "2026-11-08");
     expect(m).not.toBeNull();

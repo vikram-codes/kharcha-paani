@@ -4,15 +4,19 @@ import type { Cents } from "./money";
 /**
  * Amortizing loan with monthly compounding (§3.2, student loan):
  * on the 1st of every month after the anchor, interest = balance × APR / 12
- * is added; payments reduce the balance on their date. All values are CAD cents,
- * owed amounts positive.
+ * is added; payments reduce the balance on their date. Values are integer
+ * minor units of one currency (CAD cents, or paise for a rupee loan), owed
+ * amounts positive.
  */
 export type LoanInput = {
   anchorOwed: Cents;
   anchorDate: ISODate;
   aprPct: number;
-  /** Payments made after the anchor (positive cents). */
-  payments: { date: ISODate; cents: Cents }[];
+  /**
+   * Payments (positive cents). Counted when dated after the anchor, or on the
+   * anchor's own day when recorded after it (`afterAnchor`).
+   */
+  payments: { date: ISODate; cents: Cents; afterAnchor?: boolean }[];
   today: ISODate;
 };
 
@@ -30,7 +34,7 @@ export const monthlyInterest = (owed: Cents, aprPct: number): Cents => Math.roun
 export function loanState({ anchorOwed, anchorDate, aprPct, payments, today }: LoanInput): LoanState {
   type Ev = { date: ISODate; order: number; cents: Cents };
   const events: Ev[] = payments
-    .filter((p) => p.date > anchorDate && p.date <= today)
+    .filter((p) => (p.date > anchorDate || (p.date === anchorDate && p.afterAnchor)) && p.date <= today)
     .map((p) => ({ date: p.date, order: 1, cents: -p.cents }));
 
   // Interest postings: the 1st of each month after the anchor, up to today.
