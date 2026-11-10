@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { budgetBand, budgetStatus, type BudgetLineDef } from "./budget";
+import { needsAdding, openOccurrence, OVERDUE_GRACE_DAYS, type LedgerHit } from "./bill-due";
 import { addDays, addMonths, monthKey, monthRange, todayISO, type ISODate, type MonthKey } from "./dates";
 import { loanState, payoffMonth } from "./loan";
 import { nextPayday, type HolidayRule } from "./paydays";
@@ -216,22 +217,65 @@ function spentByCategory(rows: readonly TxRow[]) {
   return new Map(summarize(rows).expenses.map((e) => [e.category?.id ?? "__none", e.cents]));
 }
 
-export type Upcoming = { id: string; name: string; note: string | null; date: ISODate; amount_cents: number; icon: string | null; color: string | null };
+export type Upcoming = {
+  id: string;
+  name: string;
+  note: string | null;
+  date: ISODate;
+  amount_cents: number;
+  icon: string | null;
+  color: string | null;
+  /** Due within a day (or overdue) and not added yet: show the "Add" badge. */
+  addNow: boolean;
+  /** What quick-add pre-fills from the badge. */
+  categoryId: string | null;
+  accountId: string | null;
+  paysAccountId: string | null;
+};
 
-/** Next occurrence (≥ today) of each active bill, soonest first (§6). */
+/**
+ * Each active bill's next occurrence that hasn't been added yet, soonest first
+ * (§6). Unadded bills stay up to 3 days past their date; once a matching entry
+ * exists (quick-add, import or Claude), the bill moves to its next date.
+ */
 async function upcoming(db: Db, today: ISODate, cats: Map<string, CategoryInfo>): Promise<Upcoming[]> {
-  const rows = ok(
-    await db.from("recurring_series").select("id,name,note,amount_cents,cadence,next_date,end_date,category_id").eq("active", true),
+  const [rows, near] = await Promise.all([
+    db.from("recurring_series").select("id,name,note,amount_cents,cadence,next_date,end_date,category_id,account_id,pays_account_id").eq("active", true).then(ok),
+    db
+      .from("transactions")
+      .select("date,amount_cents,category_id,account_id,transaction_splits(category_id,amount_cents)")
+      .gte("date", addDays(today, -OVERDUE_GRACE_DAYS - 5))
+      .lte("date", addDays(today, 9))
+      .then(ok),
+  ]);
+  // A split transaction counts by its parts.
+  const hits: LedgerHit[] = near.flatMap((t) =>
+    t.transaction_splits.length
+      ? [
+          ...t.transaction_splits.map((s) => ({ date: t.date as ISODate, cents: Number(s.amount_cents), categoryId: s.category_id, accountId: t.account_id })),
+          // The whole payment too, for matching by account.
+          { date: t.date as ISODate, cents: Number(t.amount_cents), categoryId: null, accountId: t.account_id },
+        ]
+      : [{ date: t.date as ISODate, cents: Number(t.amount_cents), categoryId: t.category_id, accountId: t.account_id }],
   );
   const out: Upcoming[] = [];
   for (const r of rows) {
-    let d = r.next_date as ISODate;
-    if (r.cadence === "monthly") {
-      for (let i = 1; d < today; i++) d = addMonths(r.next_date, i);
-    }
-    if (d < today || (r.end_date && d > r.end_date)) continue;
+    const d = openOccurrence({ ...r, amount_cents: Number(r.amount_cents) }, today, hits);
+    if (!d) continue;
     const c = r.category_id ? cats.get(r.category_id) : undefined;
-    out.push({ id: r.id, name: r.name, note: r.note, date: d, amount_cents: Number(r.amount_cents), icon: c?.icon ?? null, color: c?.color ?? null });
+    out.push({
+      id: r.id,
+      name: r.name,
+      note: r.note,
+      date: d,
+      amount_cents: Number(r.amount_cents),
+      icon: c?.icon ?? null,
+      color: c?.color ?? null,
+      addNow: needsAdding(d, today),
+      categoryId: r.category_id,
+      accountId: r.account_id,
+      paysAccountId: r.pays_account_id,
+    });
   }
   return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
@@ -563,6 +607,8 @@ export type NewTransaction = {
   categoryId: string;
   date: ISODate;
   note?: string;
+  /** Debt this payment lowers (an Affirm plan, from a bill's "pays"). */
+  paysAccountId?: string | null;
 };
 
 /** Saves a manual entry. Expenses are negative (card purchase → debt up; chequing → cash down). */
@@ -574,9 +620,12 @@ export async function createManualTransaction(input: NewTransaction) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) throw new Error("Pick a valid date.");
   const note = input.note?.trim().slice(0, 200) || null;
   // RLS limits both lookups to the owner's rows, so foreign ids simply aren't found.
-  const [account, category] = await Promise.all([
+  const [account, category, pays] = await Promise.all([
     db.from("accounts").select("id,name,account_group").eq("id", input.accountId).in("account_group", SPEND_GROUPS).maybeSingle().then(okMaybe),
     db.from("categories").select("id,name,kind").eq("id", input.categoryId).maybeSingle().then(okMaybe),
+    input.paysAccountId && input.kind === "expense"
+      ? db.from("accounts").select("id").eq("id", input.paysAccountId).in("account_group", ["debt_loan", "debt_card"]).maybeSingle().then(okMaybe)
+      : Promise.resolve(null),
   ]);
   if (!account) throw new Error("Choose where it was paid from.");
   if (!category || category.kind !== input.kind) throw new Error("Choose a category.");
@@ -584,7 +633,16 @@ export async function createManualTransaction(input: NewTransaction) {
   ok(
     await db
       .from("transactions")
-      .insert({ account_id: account.id, category_id: category.id, date: input.date, amount_cents: amount, description: note ?? category.name, note, source: "manual" })
+      .insert({
+        account_id: account.id,
+        category_id: category.id,
+        date: input.date,
+        amount_cents: amount,
+        description: note ?? category.name,
+        note,
+        source: "manual",
+        pays_account_id: pays?.id ?? null,
+      })
       .select("id")
       .single(),
   );

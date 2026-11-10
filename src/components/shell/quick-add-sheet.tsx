@@ -62,11 +62,32 @@ function press(current: string, key: string): string {
   return whole === "0" ? key : current + key;
 }
 
+/** A bill's details, filled in when quick-add opens from its "Add" badge. */
+export type QuickAddPrefill = {
+  label: string;
+  cents: number; // signed: negative = expense
+  categoryId: string | null;
+  accountId: string | null;
+  paysAccountId: string | null;
+  date: string;
+};
+
+/** 55000 → "550", 27958 → "279.58" (what the keypad would have typed). */
+const centsToTyped = (c: number) =>
+  c % 100 === 0 ? String(c / 100) : (c / 100).toFixed(2);
+
 /**
  * Quick-add (§7.5): amount keypad → category → save, with "Paid from" (chequing
- * or a card) defaulting to the last account used.
+ * or a card) defaulting to the last account used. With `prefill` (a bill's Add
+ * badge) it opens with the bill's amount, category, account and date set.
  */
-export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
+export function QuickAddSheet({
+  trigger,
+  prefill,
+}: {
+  trigger: ReactElement;
+  prefill?: QuickAddPrefill;
+}) {
   const [open, setOpen] = useState(false);
   const [opts, setOpts] = useState<Options | null>(null);
   const [kind, setKind] = useState<Kind>("expense");
@@ -78,6 +99,7 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
   const [date, setDate] = useState("");
   const [note, setNote] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [paysId, setPaysId] = useState<string | null>(null);
   const [loading, startLoading] = useTransition();
   const [saving, startSaving] = useTransition();
 
@@ -103,19 +125,23 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
           )?.id ||
           "",
       );
-      setDate((d) => d || o.today);
+      // A bill due tomorrow is entered today (no future dates).
+      setDate((d) => (d && d <= o.today ? d : o.today));
     });
 
   const onOpenChange = (next: boolean) => {
     setOpen(next);
     if (next) {
-      // Closing without saving discards the entry; each open starts clean.
-      setAmount("");
-      setCategoryId(null);
-      setNote("");
+      // Closing without saving discards the entry; each open starts clean
+      // (or from the bill it was opened for).
+      setKind(prefill && prefill.cents > 0 ? "income" : "expense");
+      setAmount(prefill ? centsToTyped(Math.abs(prefill.cents)) : "");
+      setCategoryId(prefill?.categoryId ?? null);
+      setNote(prefill?.label ?? "");
       setShowAll(false);
-      setDate("");
-      setAccountId("");
+      setDate(prefill?.date ?? "");
+      setAccountId(prefill?.accountId ?? "");
+      setPaysId(prefill?.paysAccountId ?? null);
       setFromId("");
       setToId("");
       load(); // fresh "last used" account + frequent categories each time
@@ -128,7 +154,17 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
       ? parseToCents(amount.replace(/\.$/, "") || "0")
       : 0;
   const cats = (kind === "expense" ? opts?.expense : opts?.income) ?? [];
-  const visible = showAll ? cats : cats.slice(0, SHOWN);
+  const top = cats.slice(0, SHOWN);
+  // A pre-filled category that isn't among the frequent ones still shows, selected.
+  const picked =
+    categoryId && !top.some((c) => c.id === categoryId)
+      ? cats.find((c) => c.id === categoryId)
+      : undefined;
+  const visible = showAll
+    ? cats
+    : picked
+      ? [picked, ...top.slice(0, SHOWN - 1)]
+      : top;
   const isTransfer = kind === "transfer";
   const canSave = isTransfer
     ? cents > 0 && !!fromId && !!toId && fromId !== toId && !saving
@@ -157,6 +193,11 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
         categoryId,
         date,
         note,
+        // The bill's debt link only applies while it's still that bill's category.
+        paysAccountId:
+          kind === "expense" && categoryId === prefill?.categoryId
+            ? paysId
+            : null,
       });
       if (!res.ok) {
         toast.error(res.error);
@@ -182,6 +223,8 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
     accountId,
     date,
     note,
+    paysId,
+    prefill?.categoryId,
   ]);
 
   // Desktop: type the amount, Enter to save.
@@ -256,6 +299,11 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
           >
             ${amount || "0"}
           </p>
+          {prefill && (
+            <p className="-mt-3 text-center text-xs text-muted-foreground">
+              From your bills · {prefill.label}
+            </p>
+          )}
 
           {isTransfer && (
             <div className="flex flex-col gap-2">

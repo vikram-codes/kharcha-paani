@@ -2,6 +2,8 @@ import Link from "next/link";
 import { ChevronRight, CreditCard, TrendingUp } from "lucide-react";
 import { AnimatedCents } from "@/components/animated-number";
 import { CashCard } from "@/components/cash-card";
+import { AddBillBadge } from "@/components/bills/add-bill-badge";
+import { dueLabel } from "@/lib/bill-due";
 import { CategoryChip } from "@/components/category-icon";
 import { HomeTile } from "@/components/home-tile";
 import { SegmentRing } from "@/components/ring";
@@ -89,15 +91,19 @@ export function ComingUp({ h }: { h: Data["h"] }) {
         {h.upcoming.map((u) => {
           const inDays = daysBetween(h.today, u.date);
           return (
-            <div key={u.id} className="flex items-center gap-3 py-2.5 opacity-60">
-              <CategoryChip icon={u.icon} color={u.color} size="sm" dashed />
-              <span className="flex min-w-0 flex-1 flex-col">
-                <span className="truncate text-sm font-medium">{u.name}</span>
-                <span className="truncate text-xs text-muted-foreground">
-                  {formatShort(u.date)} · {inDays === 0 ? "today" : inDays === 1 ? "tomorrow" : `in ${inDays} days`}
+            <div key={u.id} className="flex items-center gap-3 py-2.5">
+              {/* Not spent yet: faded, except the Add badge. */}
+              <div className={cn("flex min-w-0 flex-1 items-center gap-3", !u.addNow && "opacity-60")}>
+                <CategoryChip icon={u.icon} color={u.color} size="sm" dashed />
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="truncate text-sm font-medium">{u.name}</span>
+                  <span className={cn("truncate text-xs", inDays < 0 ? "text-budget-high" : "text-muted-foreground")}>
+                    {formatShort(u.date)} · {dueLabel(inDays)}
+                  </span>
                 </span>
-              </span>
-              <span className="num text-sm">{formatCents(u.amount_cents)}</span>
+                <span className="num text-sm">{formatCents(u.amount_cents)}</span>
+              </div>
+              {u.addNow && <AddBillBadge bill={u} />}
             </div>
           );
         })}

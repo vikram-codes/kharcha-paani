@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { ArrowLeftRight, ChevronLeft, ChevronRight, Search, Split } from "lucide-react";
 import { loadActivity } from "@/app/actions/activity";
 import { onDataChanged } from "@/lib/data-events";
+import { AddBillBadge } from "@/components/bills/add-bill-badge";
 import { CategoryChip } from "@/components/category-icon";
 import type { ActivityRow, Upcoming } from "@/lib/data";
 import { formatDay, formatMonth, formatShort, shiftMonth } from "@/lib/dates";
@@ -149,11 +150,14 @@ export function TransactionsView({ initial, firstMonth }: { initial: Activity; f
             <h2 className="mb-1 px-1 text-xs font-medium tracking-wider text-muted-foreground uppercase">Upcoming</h2>
             <div className="rounded-2xl border border-dashed border-border px-3">
               {shown.upcoming.slice(0, 3).map((u) => (
-                <div key={u.id} className="flex items-center gap-3 py-2.5 opacity-55">
-                  <CategoryChip icon={u.icon} color={u.color} size="sm" dashed />
-                  <span className="min-w-0 flex-1 truncate text-sm">{u.name}</span>
-                  <span className="text-xs text-muted-foreground">{formatShort(u.date)}</span>
-                  <span className="num w-20 text-right text-sm">{formatCents(u.amount_cents)}</span>
+                <div key={u.id} className="flex items-center gap-3 py-2.5">
+                  <div className={cn("flex min-w-0 flex-1 items-center gap-3", !u.addNow && "opacity-55")}>
+                    <CategoryChip icon={u.icon} color={u.color} size="sm" dashed />
+                    <span className="min-w-0 flex-1 truncate text-sm">{u.name}</span>
+                    <span className={cn("text-xs", u.date < shown.today ? "text-budget-high" : "text-muted-foreground")}>{formatShort(u.date)}</span>
+                    <span className="num w-20 text-right text-sm">{formatCents(u.amount_cents)}</span>
+                  </div>
+                  {u.addNow && <AddBillBadge bill={u} />}
                 </div>
               ))}
             </div>
