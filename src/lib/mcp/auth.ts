@@ -25,12 +25,16 @@ const sessions = new Map<string, Session>(); // per warm server instance
 export async function clientForToken(token: string): Promise<SupabaseClient<Database> | null> {
   if (!/^[A-Za-z0-9_-]{40,60}$/.test(token)) return null;
   const hash = hashToken(token);
-  const cached = sessions.get(hash);
-  if (cached && cached.expiresAt - Date.now() > 60_000) return userClient(cached.accessToken);
-
+  // Checked on every request: a link revoked in Settings stops working at once,
+  // even on server instances that still hold a session for it.
   const a = admin();
   const { data: row } = await a.from("api_tokens").select("id,user_id,revoked_at,last_used_at").eq("token_hash", hash).maybeSingle();
-  if (!row || row.revoked_at) return null;
+  if (!row || row.revoked_at) {
+    sessions.delete(hash);
+    return null;
+  }
+  const cached = sessions.get(hash);
+  if (cached && cached.expiresAt - Date.now() > 60_000) return userClient(cached.accessToken);
   const { data: user } = await a.auth.admin.getUserById(row.user_id);
   if (!user?.user?.email) return null;
 

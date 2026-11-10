@@ -26,9 +26,26 @@ const writeLast = (t: number) => {
   }
 };
 
+/** Remembers whether a PIN is set, so the lock still holds when the server can't be reached. */
+const LOCK_ON = "kp:lock-on";
+const rememberLockOn = (on: boolean) => {
+  try {
+    localStorage.setItem(LOCK_ON, on ? "1" : "0");
+  } catch {
+    /* private mode */
+  }
+};
+const lockWasOn = () => {
+  try {
+    return localStorage.getItem(LOCK_ON) === "1";
+  } catch {
+    return false;
+  }
+};
+
 const greeting = () => {
   const h = new Date().getHours();
-  return h < 5 ? "Up late" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+  return h < 5 ? "Good night" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
 };
 
 /**
@@ -53,9 +70,14 @@ export function AppLock() {
     appLockEnabled()
       .then((on) => {
         enabled.current = on;
+        rememberLockOn(on);
         lockIfIdle();
       })
-      .catch(() => setState("open")); // offline/signed out: don't trap the screen
+      .catch(() => {
+        // Offline: stay locked if a PIN was set last time we knew; otherwise don't trap the screen.
+        enabled.current = lockWasOn();
+        lockIfIdle();
+      });
 
     const touch = () => {
       const now = Date.now();
@@ -129,7 +151,8 @@ export function AppLock() {
                   </div>
                 }
                 check={async (pin) => {
-                  const res = await unlockApp(pin);
+                  const res = await unlockApp(pin).catch(() => null);
+                  if (!res) return "Can't check your PIN offline. Try again when you're connected.";
                   if (res.ok || res.noPin) {
                     writeLast(Date.now());
                     setState("open");
