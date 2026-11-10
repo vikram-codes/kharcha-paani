@@ -1,11 +1,11 @@
 import Link from "next/link";
-import { ArrowLeftRight, ChevronRight, CreditCard, TrendingUp } from "lucide-react";
+import { ChevronRight, CreditCard, TrendingUp } from "lucide-react";
 import { AnimatedCents } from "@/components/animated-number";
 import { CashCard } from "@/components/cash-card";
 import { CategoryChip } from "@/components/category-icon";
 import { HomeTile } from "@/components/home-tile";
 import { SegmentRing } from "@/components/ring";
-import { rowSubtitle, rowTitle } from "@/components/transactions/format";
+import { mergeTransfers, rowSubtitle, rowTitle, transferSubtitle, transferTitle } from "@/components/transactions/format";
 import { bandColorVar } from "@/lib/budget";
 import { activityData, getHome, monthSummaryData } from "@/lib/data";
 import { daysBetween, formatDay, formatMonthName, formatShort, monthKey, todayISO } from "@/lib/dates";
@@ -17,7 +17,7 @@ export async function loadWideHome() {
   // All three loads in parallel (they only share the month, which is today's).
   const month = monthKey(todayISO());
   const [h, m, a] = await Promise.all([getHome(), monthSummaryData(month), activityData(month)]);
-  return { h, summary: m.summary, recent: a.rows.filter((r) => !r.isTransfer).slice(0, 6) };
+  return { h, summary: m.summary, recent: mergeTransfers(a.rows).slice(0, 6) };
 }
 type Data = Awaited<ReturnType<typeof loadWideHome>>;
 
@@ -147,14 +147,17 @@ export function Recent({ d }: { d: Data }) {
       <div className="divide-y divide-border">
         {d.recent.map((r) => (
           <div key={r.id} className="flex items-center gap-3 py-2.5">
-            {r.isTransfer ? <ArrowLeftRight className="size-4" /> : <CategoryChip icon={r.category?.icon} color={r.category?.color} size="sm" />}
+            <CategoryChip icon={r.isTransfer ? "arrow-left-right" : r.category?.icon} color={r.isTransfer ? undefined : r.category?.color} size="sm" />
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-sm font-medium">{rowTitle(r)}</span>
+              <span className="truncate text-sm font-medium">{r.isTransfer ? transferTitle(r) : rowTitle(r)}</span>
               <span className="truncate text-xs text-muted-foreground">
-                {formatShort(r.date)} · {rowSubtitle(r)}
+                {formatShort(r.date)} · {r.isTransfer ? transferSubtitle(r) : rowSubtitle(r)}
               </span>
             </span>
-            <span className={cn("num text-sm", r.amount_cents > 0 && "text-money-in")}>{formatCents(r.amount_cents, { signed: r.amount_cents > 0 })}</span>
+            {/* Transfers move your own money: shown plain, not as spending or income. */}
+            <span className={cn("num text-sm", r.isTransfer ? "text-muted-foreground" : r.amount_cents > 0 && "text-money-in")}>
+              {r.isTransfer ? formatCents(Math.abs(r.amount_cents)) : formatCents(r.amount_cents, { signed: r.amount_cents > 0 })}
+            </span>
           </div>
         ))}
       </div>
