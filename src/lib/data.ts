@@ -400,7 +400,7 @@ export async function getDebts() {
   const { db, today } = await session();
   const [bal, meta] = await Promise.all([
     balances(db),
-    db.from("accounts").select("id,institution,last4,credit_limit_cents,apr,reported_balance_cents,reported_on").then(ok),
+    db.from("accounts").select("id,institution,last4,credit_limit_cents,apr").then(ok),
   ]);
   const loan = await getLoanFor(db, today, bal);
   const info = new Map(meta.map((m) => [m.id, m]));
@@ -413,8 +413,6 @@ export async function getDebts() {
       last4: m?.last4 ?? null,
       limit: m?.credit_limit_cents != null ? Number(m.credit_limit_cents) : null,
       apr: m?.apr != null ? Number(m.apr) : null,
-      // What the bank showed when the owner last checked; the gap is spending not entered yet.
-      reported: m?.reported_balance_cents != null ? { owed: -Number(m.reported_balance_cents), on: m.reported_on as ISODate } : null,
     };
   };
   const cards = bal.filter((b) => b.account_group === "debt_card").map(withInfo);
@@ -765,7 +763,7 @@ export async function activityData(month?: MonthKey) {
 export async function getAccountDetail(id: string, limit = 80) {
   const { db, today } = await authed();
   const acct = okMaybe(
-    await db.from("accounts").select("id,key,name,institution,last4,account_group,credit_limit_cents,apr,reported_balance_cents,reported_on,archived").eq("id", id).maybeSingle(),
+    await db.from("accounts").select("id,key,name,institution,last4,account_group,credit_limit_cents,apr,archived").eq("id", id).maybeSingle(),
   );
   // The emergency fund stays behind its PIN; legacy history accounts have no balance.
   if (!acct || acct.account_group === "cash_emergency" || acct.account_group === "legacy") return null;
@@ -777,7 +775,6 @@ export async function getAccountDetail(id: string, limit = 80) {
   const debt = acct.account_group.startsWith("debt_");
   const balance = Number(bal?.balance_cents ?? 0);
   const owed = debt ? -balance : null;
-  const reported = acct.reported_balance_cents != null ? -Number(acct.reported_balance_cents) : null;
   return {
     today,
     id: acct.id,
@@ -790,7 +787,6 @@ export async function getAccountDetail(id: string, limit = 80) {
     owed,
     limit: acct.credit_limit_cents != null ? Number(acct.credit_limit_cents) : null,
     apr: acct.apr != null ? Number(acct.apr) : null,
-    stillToAdd: debt && reported != null && owed != null && reported - owed > 50 ? { cents: reported - owed, on: acct.reported_on as ISODate } : null,
     since: (bal?.anchor_date as ISODate | null) ?? null,
     rows: toActivityRows(rows, cats),
   };

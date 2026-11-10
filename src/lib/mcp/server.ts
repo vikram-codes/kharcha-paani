@@ -195,7 +195,6 @@ export function registerTools(server: McpServer) {
             owed: $(c.owed),
             limit: c.limit != null ? $(c.limit) : undefined,
             apr: c.apr ?? undefined,
-            still_to_enter: c.reported && c.reported.owed > c.owed ? $(c.reported.owed - c.owed) : undefined,
           })),
           affirm: d.plans.map((p) => ({ name: p.name, owed: $(p.owed) })),
           student_loan: loan && {

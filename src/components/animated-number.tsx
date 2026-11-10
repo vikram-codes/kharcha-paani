@@ -2,6 +2,7 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import { animate, useReducedMotion } from "motion/react";
+import { useLockView } from "@/lib/app-lock-state";
 import { formatCents } from "@/lib/money";
 
 /**
@@ -31,10 +32,17 @@ export function AnimatedCents({
   // React only ever renders this initial text; the effect drives the number
   // afterwards, so re-renders can't snap it back mid-animation.
   const [initialText] = useState(() => fmt(0));
+  // Wait while the PIN screen covers the app; count again from $0 after each unlock.
+  const { covered, reveals } = useLockView();
+  const seenReveal = useRef(reveals);
 
   useLayoutEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || covered) return;
+    if (seenReveal.current !== reveals) {
+      seenReveal.current = reveals;
+      displayed.current = 0;
+    }
     // Start from what's on screen, not the last target: a re-run (React dev
     // double-invokes effects; a month switch mid-count) then continues smoothly.
     const from = displayed.current;
@@ -52,8 +60,8 @@ export function AnimatedCents({
       },
     });
     return () => controls.stop();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- animate only when the value changes
-  }, [value]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- animate when the value changes or the lock lifts
+  }, [value, covered, reveals]);
 
   return (
     <span ref={ref} className={className}>

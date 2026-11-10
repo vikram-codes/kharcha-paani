@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Droplet } from "lucide-react";
+import { signOut } from "@/app/actions/auth";
 import { appLockEnabled, unlockApp } from "@/app/actions/emergency";
 import { PinPad } from "@/components/pin-pad";
+import { setLockCovered } from "@/lib/app-lock-state";
 
 const IDLE_MS = 10 * 60_000;
 const KEY = "kp:last-active";
@@ -22,6 +24,11 @@ const writeLast = (t: number) => {
   } catch {
     /* private mode: the lock still works within this session */
   }
+};
+
+const greeting = () => {
+  const h = new Date().getHours();
+  return h < 5 ? "Up late" : h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
 };
 
 /**
@@ -71,9 +78,21 @@ export function AppLock() {
     };
   }, [lockIfIdle]);
 
-  // While unlocked, being here counts as activity (first open after unlock, etc.).
   useEffect(() => {
+    // Animations behind the cover wait for it to lift (and replay after unlock).
+    setLockCovered(state !== "open");
+    // While unlocked, being here counts as activity (first open after unlock, etc.).
     if (state === "open") writeLast(Date.now());
+  }, [state]);
+
+  // Lock screen: no page scrolling behind it.
+  useEffect(() => {
+    if (state !== "locked") return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
   }, [state]);
 
   return (
@@ -82,36 +101,56 @@ export function AppLock() {
         <motion.div
           key="lock"
           initial={{ opacity: 1 }}
-          exit={{ opacity: 0, scale: 1.02 }}
-          transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-          className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-8 bg-background px-6 pt-safe pb-safe"
+          exit={{ opacity: 0, scale: 1.04 }}
+          transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+          className="fixed inset-0 z-[100] flex flex-col overflow-y-auto bg-background"
           role="dialog"
           aria-modal="true"
           aria-label="Kharcha-Paani is locked"
         >
-          <div className="flex flex-col items-center gap-3 text-center">
-            <span className="grid size-16 place-items-center rounded-[22px] bg-[#0a0a0a] ring-1 ring-white/10">
-              <Droplet className="size-8 fill-lime text-lime" />
-            </span>
-            {state === "locked" && (
-              <>
-                <h1 className="text-xl font-semibold tracking-tight">Welcome back</h1>
-                <p className="text-sm text-muted-foreground">Enter your PIN to unlock</p>
-              </>
-            )}
-          </div>
           {state === "locked" && (
-            <PinPad
-              check={async (pin) => {
-                const res = await unlockApp(pin);
-                if (res.ok || res.noPin) {
-                  writeLast(Date.now());
-                  setState("open");
-                  return null;
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
+              className="mx-auto flex w-full max-w-sm flex-1 flex-col items-center px-6 pt-[calc(env(safe-area-inset-top)+1.5rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)] md:max-h-[760px] md:my-auto"
+            >
+              <PinPad
+                variant="screen"
+                header={
+                  <div className="flex flex-col items-center gap-4 text-center">
+                    <span className="grid size-[clamp(56px,8.5dvh,72px)] place-items-center rounded-[24px] bg-[#0a0a0a] shadow-lg ring-1 ring-white/10">
+                      <Droplet className="size-[45%] fill-lime text-lime" />
+                    </span>
+                    <div>
+                      <h1 className="text-2xl font-semibold tracking-tight">{greeting()}</h1>
+                      <p className="mt-1 text-sm text-muted-foreground">Enter your PIN to open Kharcha-Paani</p>
+                    </div>
+                  </div>
                 }
-                return res.error;
-              }}
-            />
+                check={async (pin) => {
+                  const res = await unlockApp(pin);
+                  if (res.ok || res.noPin) {
+                    writeLast(Date.now());
+                    setState("open");
+                    return null;
+                  }
+                  return res.error;
+                }}
+              />
+              <form action={signOut} className="mt-2">
+                <button type="submit" className="px-3 py-2 text-xs text-muted-foreground hover:text-foreground">
+                  Forgot PIN? Sign out
+                </button>
+              </form>
+            </motion.div>
+          )}
+          {state === "checking" && (
+            <div className="grid flex-1 place-items-center">
+              <span className="grid size-[72px] place-items-center rounded-[24px] bg-[#0a0a0a] ring-1 ring-white/10">
+                <Droplet className="size-9 fill-lime text-lime" />
+              </span>
+            </div>
           )}
         </motion.div>
       )}

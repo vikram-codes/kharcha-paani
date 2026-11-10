@@ -12,7 +12,7 @@ import { UpdateBalance } from "@/components/update-balance";
 import { bandColorVar, budgetBand } from "@/lib/budget";
 import { notifyDataChanged, onDataChanged } from "@/lib/data-events";
 import type { ActivityRow } from "@/lib/data";
-import { formatDay, formatShort } from "@/lib/dates";
+import { formatDay } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
@@ -69,11 +69,6 @@ export function AccountView({ initial }: { initial: Detail }) {
               {used}% of {formatCents(a.limit, { whole: true })} limit · {formatCents(Math.max(0, a.limit - (a.owed ?? 0)))} available
             </p>
           </div>
-        )}
-        {a.stillToAdd && (
-          <p className="mt-3 rounded-xl bg-budget-high/10 px-3 py-2 text-xs text-budget-high">
-            Still to add: <span className="num font-medium">{formatCents(a.stillToAdd.cents)}</span> (your bank showed more on {formatShort(a.stillToAdd.on)})
-          </p>
         )}
       </section>
 

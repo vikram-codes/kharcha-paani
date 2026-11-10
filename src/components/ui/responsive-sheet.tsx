@@ -37,21 +37,25 @@ function useKeyboardInset() {
 export function ResponsiveSheetContent({ className, children, style, ...props }: Omit<ComponentProps<typeof SheetContent>, "side">) {
   const keyboard = useKeyboardInset();
 
-  // Keep the focused field visible once the sheet has moved above the keyboard.
+  // Keep the focused field visible once the sheet has moved above the keyboard
+  // (after its 200ms slide). A field inside [data-keyboard-group] brings the
+  // whole group along, e.g. the note together with the Save button under it.
   useEffect(() => {
     if (!keyboard) return;
     const el = document.activeElement as HTMLElement | null;
-    if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) {
-      requestAnimationFrame(() => el.scrollIntoView({ block: "nearest", behavior: "smooth" }));
-    }
+    if (!el || !/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+    const target = el.closest<HTMLElement>("[data-keyboard-group]") ?? el;
+    const t = setTimeout(() => target.scrollIntoView({ block: "end", behavior: "smooth" }), 220);
+    return () => clearTimeout(t);
   }, [keyboard]);
 
   return (
     <SheetContent
       side="bottom"
-      style={keyboard ? { ...style, bottom: keyboard, maxHeight: `calc(100dvh - ${keyboard}px - 12px)` } : style}
+      style={keyboard ? { ...style, bottom: keyboard, maxHeight: `calc(100dvh - ${keyboard}px - env(safe-area-inset-top) - 12px)` } : style}
       className={cn(
-        "max-h-[92dvh] overflow-y-auto overscroll-contain rounded-t-3xl border-border pb-safe transition-[bottom] duration-200 ease-out",
+        // Always leave a strip of page above the sheet to tap and close it.
+        "max-h-[calc(100dvh-env(safe-area-inset-top)-4.5rem)] overflow-y-auto overscroll-contain rounded-t-3xl border-border pb-safe transition-[bottom] duration-200 ease-out",
         keyboard > 0 && "rounded-b-3xl pb-3",
         "md:data-[side=bottom]:inset-0 md:data-[side=bottom]:m-auto md:data-[side=bottom]:h-fit md:data-[side=bottom]:max-h-[85dvh]",
         "md:data-[side=bottom]:w-[min(460px,calc(100vw-2rem))] md:data-[side=bottom]:rounded-3xl md:data-[side=bottom]:border md:data-[side=bottom]:pb-0",

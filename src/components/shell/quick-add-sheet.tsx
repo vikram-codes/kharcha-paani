@@ -376,14 +376,6 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
             </div>
           )}
 
-          <input
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="Note (optional)"
-            maxLength={200}
-            className="h-11 rounded-xl bg-surface-1 px-3 text-sm ring-1 ring-border outline-none placeholder:text-muted-foreground/70 focus:ring-2 focus:ring-lime"
-          />
-
           {/* Keypad */}
           <div className="grid grid-cols-3 gap-2">
             {KEYS.map((k) => (
@@ -399,22 +391,37 @@ export function QuickAddSheet({ trigger }: { trigger: ReactElement }) {
             ))}
           </div>
 
-          <button
-            type="button"
-            onClick={save}
-            disabled={!canSave}
-            className="flex h-12 items-center justify-center gap-2 rounded-xl bg-lime font-semibold text-on-lime transition-transform duration-(--duration-fast) active:scale-[0.98] disabled:opacity-40"
-          >
-            {saving ? (
-              <Loader2 className="size-5 animate-spin" />
-            ) : cents > 0 ? (
-              `${isTransfer ? (opts?.transferTo.find((a) => a.id === toId)?.card ? "Pay" : "Move") : "Save"} ${formatCents(cents)}`
-            ) : isTransfer ? (
-              "Transfer"
-            ) : (
-              "Save"
-            )}
-          </button>
+          {/* Note sits with Save, so the phone keyboard opens under both
+              (not under the number pad). */}
+          <div data-keyboard-group className="flex flex-col gap-2">
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+              }}
+              placeholder="Note (optional)"
+              enterKeyHint="done"
+              maxLength={200}
+              className="h-11 rounded-xl bg-surface-1 px-3 text-sm ring-1 ring-border outline-none placeholder:text-muted-foreground/70 focus:ring-2 focus:ring-lime"
+            />
+            <button
+              type="button"
+              onClick={save}
+              disabled={!canSave}
+              className="flex h-12 items-center justify-center gap-2 rounded-xl bg-lime font-semibold text-on-lime transition-transform duration-(--duration-fast) active:scale-[0.98] disabled:opacity-40"
+            >
+              {saving ? (
+                <Loader2 className="size-5 animate-spin" />
+              ) : cents > 0 ? (
+                `${isTransfer ? (opts?.transferTo.find((a) => a.id === toId)?.card ? "Pay" : "Move") : "Save"} ${formatCents(cents)}`
+              ) : isTransfer ? (
+                "Transfer"
+              ) : (
+                "Save"
+              )}
+            </button>
+          </div>
         </div>
       </ResponsiveSheetContent>
     </Sheet>
