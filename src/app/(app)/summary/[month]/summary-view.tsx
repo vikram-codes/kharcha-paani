@@ -388,10 +388,9 @@ function Mini({ label, spent, budget }: { label: string; spent: number; budget: 
   return (
     <div>
       <span className="text-muted-foreground">{label}</span>
-      <span className="num mt-0.5 block text-sm font-medium">
-        {money(spent)}
-        <span className="text-muted-foreground"> / {money(budget)}</span>
-      </span>
+      {/* Spent, then the budget on its own line: "$1,305 / $2,058" wrapped mid-figure on phones. */}
+      <span className="num mt-0.5 block text-sm font-medium whitespace-nowrap">{money(spent)}</span>
+      <span className="num block text-[11px] whitespace-nowrap text-muted-foreground">of {money(budget)}</span>
     </div>
   );
 }
