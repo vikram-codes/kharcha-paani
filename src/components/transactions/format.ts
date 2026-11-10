@@ -30,7 +30,23 @@ export const rowSubtitle = (r: ActivityRow) =>
 export type FeedRow = ActivityRow & {
   /** For transfers: where the money went. Either side can be unknown when only one leg was imported. */
   route?: { from: string | null; to: string | null };
+  /** For transfers: the amount as chequing (or your bank) sees it: − left, + came in. */
+  flow?: number;
 };
+
+/** Icon tint for transfer chips (hex: the chip derives its background from it). */
+export const TRANSFER_HEX = "#e0a000";
+
+const isChequing = (r: ActivityRow) => /chequing/i.test(r.account);
+const isBank = (r: ActivityRow) => r.accountGroup.startsWith("cash");
+
+/** Owner's rule: transfers read from chequing's side, else from the bank account's side. */
+function flowOf(from: ActivityRow | null, to: ActivityRow | null, abs: number): number {
+  if (to && isChequing(to) && !(from && isChequing(from))) return abs;
+  if (from && isChequing(from)) return -abs;
+  if (to && isBank(to) && !(from && isBank(from))) return abs;
+  return -abs;
+}
 
 /**
  * Activity with each transfer shown once: the money-out leg and its money-in
@@ -58,26 +74,31 @@ export function mergeTransfers(rows: ActivityRow[]): FeedRow[] {
     if (other) {
       used.add(other.id);
       const [from, to] = r.amount_cents < 0 ? [r, other] : [other, r];
-      out.push({ ...from, route: { from: shortAccount(from.account), to: shortAccount(to.account) } });
+      out.push({ ...from, route: { from: shortAccount(from.account), to: shortAccount(to.account) }, flow: flowOf(from, to, Math.abs(r.amount_cents)) });
     } else {
       const acct = shortAccount(r.account);
-      out.push({ ...r, route: r.amount_cents < 0 ? { from: acct, to: null } : { from: null, to: acct } });
+      const leaving = r.amount_cents < 0;
+      out.push({
+        ...r,
+        route: leaving ? { from: acct, to: null } : { from: null, to: acct },
+        flow: flowOf(leaving ? r : null, leaving ? null : r, Math.abs(r.amount_cents)),
+      });
     }
   }
   return out;
 }
 
+/** "Chequing → Triangle"; with only one side known, "Into Chequing" / "Out of Chequing". */
 export const transferTitle = (r: FeedRow) =>
-  r.route?.from && r.route.to ? `${r.route.from} → ${r.route.to}` : rowTitle(r);
+  r.route?.from && r.route.to
+    ? `${r.route.from} → ${r.route.to}`
+    : r.route?.to
+      ? `Into ${r.route.to}`
+      : r.route?.from
+        ? `Out of ${r.route.from}`
+        : rowTitle(r);
 
-export const transferSubtitle = (r: FeedRow) =>
-  (r.route?.from && r.route.to
-    ? "Transfer"
-    : r.route?.from
-      ? `Transfer out of ${r.route.from}`
-      : r.route?.to
-        ? `Transfer into ${r.route.to}`
-        : "Transfer") + (r.note && r.note !== transferTitle(r) ? ` · ${r.note}` : "");
+export const transferSubtitle = (r: FeedRow) => "Transfer" + (r.note ? ` · ${r.note}` : "");
 
 /** Spending only (money out, not transfers). */
 export const spentOf = (rows: ActivityRow[]) => rows.filter((r) => !r.isTransfer && r.amount_cents < 0).reduce((t, r) => t - r.amount_cents, 0);

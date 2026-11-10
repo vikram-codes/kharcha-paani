@@ -10,7 +10,8 @@ import type { ActivityRow, Upcoming } from "@/lib/data";
 import { formatDay, formatMonth, formatShort, shiftMonth } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
-import { rowSubtitle, rowTitle, shortAccount, spentOf } from "./format";
+import { Amount } from "./amount";
+import { TRANSFER_HEX, mergeTransfers, rowSubtitle, rowTitle, shortAccount, spentOf, transferSubtitle, transferTitle, type FeedRow } from "./format";
 import { TransactionSheet } from "./transaction-sheet";
 
 type Activity = { month: string; today: string; current: string; rows: ActivityRow[]; upcoming: Upcoming[] };
@@ -37,7 +38,7 @@ export function TransactionsView({ initial, firstMonth }: { initial: Activity; f
   const [shown, setShown] = useState<Activity>(initial);
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
-  const [showTransfers, setShowTransfers] = useState(false);
+  const [showTransfers, setShowTransfers] = useState(true);
   const [open, setOpen] = useState<ActivityRow | null>(null);
   const [reload, setReload] = useState(0);
 
@@ -73,18 +74,19 @@ export function TransactionsView({ initial, firstMonth }: { initial: Activity; f
 
   const list = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return shown.rows.filter((r) => {
+    // Each transfer once, read from chequing's side (owner, Nov 10 2026).
+    return mergeTransfers(shown.rows).filter((r) => {
       if (!showTransfers && r.isTransfer) return false;
       if (filter === "cards" && r.accountGroup !== "debt_card") return false;
       if (filter === "chequing" && !/chequing/i.test(r.account)) return false;
-      if (filter === "in" && r.amount_cents <= 0) return false;
+      if (filter === "in" && (r.flow ?? r.amount_cents) <= 0) return false;
       if (!needle) return true;
       return [r.description, r.note ?? "", r.category?.name ?? "", r.account, rowTitle(r)].some((s) => s.toLowerCase().includes(needle));
     });
   }, [shown.rows, q, filter, showTransfers]);
 
   const days = useMemo(() => {
-    const m = new Map<string, ActivityRow[]>();
+    const m = new Map<string, FeedRow[]>();
     for (const r of list) m.set(r.date, [...(m.get(r.date) ?? []), r]);
     return [...m.entries()];
   }, [list]);
@@ -166,18 +168,16 @@ export function TransactionsView({ initial, firstMonth }: { initial: Activity; f
             </div>
             <div className="divide-y divide-border rounded-2xl bg-surface-1 px-3">
               {rows.map((r) => (
-                <button key={r.id} type="button" onClick={() => setOpen(r)} className={cn("flex w-full items-center gap-3 py-3 text-left", r.isTransfer && "opacity-60")}>
-                  <CategoryChip icon={r.isTransfer ? "arrow-left-right" : r.splits.length ? "circle-dot" : r.category?.icon} color={r.category?.color} />
+                <button key={r.id} type="button" onClick={() => setOpen(r)} className="flex w-full items-center gap-3 py-3 text-left">
+                  <CategoryChip icon={r.isTransfer ? "arrow-left-right" : r.splits.length ? "circle-dot" : r.category?.icon} color={r.isTransfer ? TRANSFER_HEX : r.category?.color} />
                   <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="truncate text-sm font-medium">{rowTitle(r)}</span>
+                    <span className="truncate text-sm font-medium">{r.isTransfer ? transferTitle(r) : rowTitle(r)}</span>
                     <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
                       {r.splits.length > 0 && <Split className="size-3" />}
-                      {rowSubtitle(r)} · {shortAccount(r.account)}
+                      {r.isTransfer ? transferSubtitle(r) : `${rowSubtitle(r)} · ${shortAccount(r.account)}`}
                     </span>
                   </span>
-                  <span className={cn("num shrink-0 text-sm font-medium", r.amount_cents > 0 && !r.isTransfer && "text-money-in", r.isTransfer && "text-muted-foreground")}>
-                    {formatCents(r.amount_cents, { signed: r.amount_cents > 0 })}
-                  </span>
+                  <Amount r={r} className="shrink-0 font-medium" />
                 </button>
               ))}
             </div>
@@ -192,3 +192,4 @@ export function TransactionsView({ initial, firstMonth }: { initial: Activity; f
     </div>
   );
 }
+

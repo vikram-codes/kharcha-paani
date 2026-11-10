@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ActivityRow } from "@/lib/data";
-import { mergeTransfers, transferSubtitle, transferTitle } from "./format";
+import { mergeTransfers, transferTitle } from "./format";
 
 let n = 0;
 const row = (p: Partial<ActivityRow>): ActivityRow => ({
@@ -52,6 +52,19 @@ describe("mergeTransfers", () => {
       row({ isTransfer: true, date: "2026-10-10", amount_cents: 5000 }),
     ];
     const out = mergeTransfers(rows);
-    expect(out.map(transferSubtitle)).toEqual(["Transfer into Triangle", "Transfer out of Chequing", "Transfer into Chequing"]);
+    expect(out.map(transferTitle)).toEqual(["Into Triangle", "Out of Chequing", "Into Chequing"]);
+  });
+});
+
+describe("transfer flow (chequing's side)", () => {
+  const leg = (p: Partial<ActivityRow>) => row({ isTransfer: true, ...p });
+  const flows = (rows: ActivityRow[]) => mergeTransfers(rows).map((r) => r.flow);
+  it("out of chequing is negative, into chequing positive", () => {
+    expect(flows([leg({ amount_cents: -5000 }), leg({ amount_cents: 5000, account: "Triangle Mastercard", accountGroup: "debt_card", accountId: "tri" })])).toEqual([-5000]);
+    expect(flows([leg({ amount_cents: -5000, account: "Scotiabank Savings", accountId: "sav" }), leg({ amount_cents: 5000 })])).toEqual([5000]);
+  });
+  it("single legs: a bank leg keeps its sign, a card payment counts as money out", () => {
+    expect(flows([leg({ amount_cents: 70038 })])).toEqual([70038]);
+    expect(flows([leg({ amount_cents: 20000, account: "Costco CIBC Mastercard", accountGroup: "debt_card", accountId: "cibc" })])).toEqual([-20000]);
   });
 });

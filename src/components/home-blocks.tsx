@@ -5,7 +5,8 @@ import { CashCard } from "@/components/cash-card";
 import { CategoryChip } from "@/components/category-icon";
 import { HomeTile } from "@/components/home-tile";
 import { SegmentRing } from "@/components/ring";
-import { mergeTransfers, rowSubtitle, rowTitle, transferSubtitle, transferTitle } from "@/components/transactions/format";
+import { TRANSFER_HEX, mergeTransfers, rowSubtitle, rowTitle, transferSubtitle, transferTitle } from "@/components/transactions/format";
+import { Amount } from "@/components/transactions/amount";
 import { bandColorVar } from "@/lib/budget";
 import { activityData, getHome, monthSummaryData } from "@/lib/data";
 import { daysBetween, formatDay, formatMonthName, formatShort, monthKey, todayISO } from "@/lib/dates";
@@ -147,17 +148,14 @@ export function Recent({ d }: { d: Data }) {
       <div className="divide-y divide-border">
         {d.recent.map((r) => (
           <div key={r.id} className="flex items-center gap-3 py-2.5">
-            <CategoryChip icon={r.isTransfer ? "arrow-left-right" : r.category?.icon} color={r.isTransfer ? undefined : r.category?.color} size="sm" />
+            <CategoryChip icon={r.isTransfer ? "arrow-left-right" : r.category?.icon} color={r.isTransfer ? TRANSFER_HEX : r.category?.color} size="sm" />
             <span className="flex min-w-0 flex-1 flex-col">
               <span className="truncate text-sm font-medium">{r.isTransfer ? transferTitle(r) : rowTitle(r)}</span>
               <span className="truncate text-xs text-muted-foreground">
                 {formatShort(r.date)} · {r.isTransfer ? transferSubtitle(r) : rowSubtitle(r)}
               </span>
             </span>
-            {/* Transfers move your own money: shown plain, not as spending or income. */}
-            <span className={cn("num text-sm", r.isTransfer ? "text-muted-foreground" : r.amount_cents > 0 && "text-money-in")}>
-              {r.isTransfer ? formatCents(Math.abs(r.amount_cents)) : formatCents(r.amount_cents, { signed: r.amount_cents > 0 })}
-            </span>
+            <Amount r={r} />
           </div>
         ))}
       </div>

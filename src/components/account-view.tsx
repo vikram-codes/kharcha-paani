@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeftRight, Split } from "lucide-react";
+import { Split } from "lucide-react";
 import { loadAccount } from "@/app/actions/activity";
 import { AnimatedCents } from "@/components/animated-number";
 import { BackButton } from "@/components/back-button";
 import { CategoryChip } from "@/components/category-icon";
 import { TransactionSheet } from "@/components/transactions/transaction-sheet";
-import { rowSubtitle, rowTitle, spentOf } from "@/components/transactions/format";
+import { TRANSFER_HEX, rowSubtitle, rowTitle, spentOf } from "@/components/transactions/format";
 import { UpdateBalance } from "@/components/update-balance";
 import { bandColorVar, budgetBand } from "@/lib/budget";
 import { notifyDataChanged, onDataChanged } from "@/lib/data-events";
@@ -83,14 +83,11 @@ export function AccountView({ initial }: { initial: Detail }) {
             </div>
             <div className="divide-y divide-border rounded-2xl bg-surface-1 px-3">
               {rows.map((r) => (
-                <button key={r.id} type="button" onClick={() => setOpen(r)} className={cn("flex w-full items-center gap-3 py-3 text-left", r.isTransfer && "opacity-70")}>
-                  {r.isTransfer ? (
-                    <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-surface-2 text-muted-foreground">
-                      <ArrowLeftRight className="size-[18px]" />
-                    </span>
-                  ) : (
-                    <CategoryChip icon={r.splits.length ? "circle-dot" : r.category?.icon} color={r.category?.color} />
-                  )}
+                <button key={r.id} type="button" onClick={() => setOpen(r)} className="flex w-full items-center gap-3 py-3 text-left">
+                  <CategoryChip
+                    icon={r.isTransfer ? "arrow-left-right" : r.splits.length ? "circle-dot" : r.category?.icon}
+                    color={r.isTransfer ? TRANSFER_HEX : r.category?.color}
+                  />
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate text-sm font-medium">{rowTitle(r)}</span>
                     <span className="flex items-center gap-1 truncate text-xs text-muted-foreground">
@@ -99,7 +96,7 @@ export function AccountView({ initial }: { initial: Detail }) {
                       {r.source === "mcp" && " · by Claude"}
                     </span>
                   </span>
-                  <span className={cn("num shrink-0 text-sm font-medium", r.amount_cents > 0 && "text-money-in")}>
+                  <span className={cn("num shrink-0 text-sm font-medium", r.isTransfer ? "text-transfer" : r.amount_cents > 0 && "text-money-in")}>
                     {formatCents(r.amount_cents, { signed: r.amount_cents > 0 })}
                   </span>
                 </button>

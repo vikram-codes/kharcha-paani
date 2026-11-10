@@ -31,6 +31,8 @@
   /* Money semantics */
   --color-money-in: var(--money-in);
   --color-money-out: var(--foreground);
+  /* Moving your own money between accounts (not spending, not income) */
+  --color-transfer: var(--transfer);
 
   /* shadcn mapping */
   --color-sidebar-ring: var(--sidebar-ring);
@@ -98,6 +100,7 @@
   --budget-high: #c2410c;
   --budget-over: #dc2626;
   --money-in: #3f6212;
+  --transfer: #a16207;
 
   --card: var(--surface-1);
   --card-foreground: var(--foreground);
@@ -149,6 +152,7 @@
   --budget-high: #ff7a1a;
   --budget-over: #ff3b30;
   --money-in: #b6ff3b;
+  --transfer: #f5b301;
 
   --card: var(--surface-1);
   --card-foreground: var(--foreground);
