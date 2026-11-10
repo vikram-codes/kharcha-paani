@@ -30,6 +30,10 @@ export const viewport: Viewport = {
   viewportFit: "cover",
   width: "device-width",
   initialScale: 1,
+  // Stops iOS auto-zooming into fields; iOS still allows pinch-to-zoom.
+  maximumScale: 1,
+  // Lets sheets know about the on-screen keyboard (they lift above it).
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

@@ -1,6 +1,7 @@
 import "server-only";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { cacheLife } from "next/cache";
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import { createClient } from "@/lib/supabase/server";
@@ -83,7 +84,18 @@ async function balances(db: Db): Promise<Balance[]> {
   }));
 }
 
+/**
+ * Categories rarely change but almost every screen needs them: load them once
+ * per page render (React cache), not once per data function.
+ */
+const categoriesOnce = cache(async (): Promise<Map<string, CategoryInfo>> => categoriesFrom((await authed()).db));
+
 async function categories(db: Db): Promise<Map<string, CategoryInfo>> {
+  // Inside MCP requests (runAsUser) there is no React render to cache in.
+  return userContext.getStore() ? categoriesFrom(db) : categoriesOnce();
+}
+
+async function categoriesFrom(db: Db): Promise<Map<string, CategoryInfo>> {
   const rows = ok(await db.from("categories").select("id,key,name,kind,essential,color,icon,parent_id"));
   const byId = new Map(rows.map((r) => [r.id, r]));
   return new Map(
@@ -611,11 +623,15 @@ const PIN_LOCK_MINUTES = 5;
 export type UnlockResult = { ok: true; cents: number } | { ok: false; error: string };
 
 /** Checks the emergency PIN; on success returns the emergency fund balance. */
-export async function unlockEmergencyFund(pin: string): Promise<UnlockResult> {
+/**
+ * Checks the owner's PIN (one PIN: app lock + emergency fund). 5 wrong tries in
+ * a row lock it for 5 minutes. Server-side, so the lockout can't be skipped.
+ */
+export async function verifyOwnerPin(pin: string): Promise<{ ok: true } | { ok: false; error: string; noPin?: boolean }> {
   const { db } = await authed();
   const { isValidPin, verifyPin } = await import("./pin");
   const p = okMaybe(await db.from("profiles").select("user_id,emergency_pin_hash,pin_failed_count,pin_locked_until").maybeSingle());
-  if (!p?.emergency_pin_hash) return { ok: false, error: "Set a PIN in Settings first." };
+  if (!p?.emergency_pin_hash) return { ok: false, error: "Set a PIN in Settings first.", noPin: true };
   if (p.pin_locked_until && Date.parse(p.pin_locked_until) > Date.now()) {
     const mins = Math.ceil((Date.parse(p.pin_locked_until) - Date.now()) / 60_000);
     return { ok: false, error: `Too many tries. Try again in ${mins} min.` };
@@ -635,6 +651,21 @@ export async function unlockEmergencyFund(pin: string): Promise<UnlockResult> {
   if (p.pin_failed_count || p.pin_locked_until) {
     ok(await db.from("profiles").update({ pin_failed_count: 0, pin_locked_until: null }).eq("user_id", p.user_id).select("user_id"));
   }
+  return { ok: true };
+}
+
+/** Whether the owner has a PIN set (the app lock only applies then). */
+export async function hasOwnerPin() {
+  const { db } = await authed();
+  const p = okMaybe(await db.from("profiles").select("emergency_pin_hash").maybeSingle());
+  return Boolean(p?.emergency_pin_hash);
+}
+
+/** Checks the PIN; on success returns the emergency fund balance. */
+export async function unlockEmergencyFund(pin: string): Promise<UnlockResult> {
+  const v = await verifyOwnerPin(pin);
+  if (!v.ok) return { ok: false, error: v.error };
+  const { db } = await authed();
   const em = ok(await db.from("account_balances").select("balance_cents").eq("account_group", "cash_emergency"));
   return { ok: true, cents: em.reduce((t, r) => t + Number(r.balance_cents), 0) };
 }

@@ -8,14 +8,15 @@ import { SegmentRing } from "@/components/ring";
 import { rowSubtitle, rowTitle } from "@/components/transactions/format";
 import { bandColorVar } from "@/lib/budget";
 import { activityData, getHome, monthSummaryData } from "@/lib/data";
-import { daysBetween, formatDay, formatMonthName, formatShort } from "@/lib/dates";
+import { daysBetween, formatDay, formatMonthName, formatShort, monthKey, todayISO } from "@/lib/dates";
 import { formatCents } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 /** Home building blocks (layout A, owner picked Nov 9 2026). */
 export async function loadWideHome() {
-  const h = await getHome();
-  const [m, a] = await Promise.all([monthSummaryData(h.month), activityData(h.month)]);
+  // All three loads in parallel (they only share the month, which is today's).
+  const month = monthKey(todayISO());
+  const [h, m, a] = await Promise.all([getHome(), monthSummaryData(month), activityData(month)]);
   return { h, summary: m.summary, recent: a.rows.filter((r) => !r.isTransfer).slice(0, 6) };
 }
 type Data = Awaited<ReturnType<typeof loadWideHome>>;

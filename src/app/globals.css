@@ -241,3 +241,13 @@
     transform: translateX(300%);
   }
 }
+
+/* ── iOS: inputs under 16px make Safari zoom in on focus (and stay zoomed).
+   Keep every field at 16px on phones; desktop keeps the smaller sizes. ── */
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
