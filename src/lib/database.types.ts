@@ -375,10 +375,12 @@ export type Database = {
       }
       imports: {
         Row: {
+          account_id: string | null
           created_at: string
           file_name: string | null
           id: string
           imported_count: number
+          period_end: string | null
           row_count: number
           skipped_count: number
           source: string
@@ -386,10 +388,12 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          account_id?: string | null
           created_at?: string
           file_name?: string | null
           id?: string
           imported_count?: number
+          period_end?: string | null
           row_count?: number
           skipped_count?: number
           source: string
@@ -397,17 +401,34 @@ export type Database = {
           user_id?: string
         }
         Update: {
+          account_id?: string | null
           created_at?: string
           file_name?: string | null
           id?: string
           imported_count?: number
+          period_end?: string | null
           row_count?: number
           skipped_count?: number
           source?: string
           status?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "imports_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "account_balances"
+            referencedColumns: ["account_id"]
+          },
+          {
+            foreignKeyName: "imports_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       income_settings: {
         Row: {

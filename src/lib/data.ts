@@ -1195,6 +1195,8 @@ export type ImportCommit = {
   source: string;
   accountId: string;
   rows: { date: ISODate; posted: ISODate | null; amount_cents: number; description: string; fingerprint: string; categoryId: string | null }[];
+  /** The statement's closing date (for the statement checklist). */
+  periodEnd?: ISODate | null;
   /** Statement rows that are entries you'd already added ("same purchase"). */
   links?: { existingIds: string[]; posted: ISODate | null; amount_cents: number; description: string; fingerprint: string }[];
   skipped: number;
@@ -1276,6 +1278,8 @@ export async function commitStatementImport(input: ImportCommit) {
         imported_count: fresh.length,
         skipped_count: input.skipped + (rows.length - fresh.length) + (input.links?.length ?? 0),
         status: "committed",
+        account_id: account.id,
+        period_end: input.periodEnd && /^\d{4}-\d{2}-\d{2}$/.test(input.periodEnd) ? input.periodEnd : null,
       })
       .select("id"),
   );
@@ -2115,7 +2119,10 @@ export async function sendReminders(which: ReminderRun): Promise<number> {
   const [{ deliver }, r, { formatMonthName }] = await Promise.all([import("./push"), import("./reminders"), import("./dates")]);
   const list: import("./reminders").Reminder[] = [];
   if (which === "test") list.push({ kind: "test", keys: [], title: "Reminders are on", body: "This is how Kharcha-Paani reminders will look.", url: "/settings" });
-  if (which === "catchup") list.push(r.catchupReminder(today));
+  if (which === "catchup") {
+    const due = (await statementChecklist(db, today)).filter((s) => s.behind > 0).map((s) => s.account);
+    list.push(r.catchupReminder(today, due));
+  }
   if (which === "morning") {
     const cats = await categories(db);
     const [bills, income] = await Promise.all([upcoming(db, today, cats), incomeSettings(db)]);
@@ -2177,4 +2184,59 @@ export async function savePushSubscription(sub: { endpoint: string; p256dh: stri
 export async function removePushSubscription(endpoint: string) {
   const { db } = await authed();
   ok(await db.from("push_subscriptions").delete().eq("endpoint", endpoint).select("id"));
+}
+
+// ───────────────────────────── weekly check-up for Claude (#5, owner, Nov 11 2026) ─────────────────────────────
+
+/** Accounts with statements the app can import. */
+const STATEMENT_ACCOUNTS = ["scotia_chequing", "scotia_visa", "cibc_costco", "triangle"];
+
+/** Each statement account: last statement imported and whether newer ones are out. */
+async function statementChecklist(db: Db, today: ISODate) {
+  const { statementStatus } = await import("./statements-due");
+  const accts = ok(await db.from("accounts").select("id,key,name").in("key", STATEMENT_ACCOUNTS).eq("archived", false).order("sort_order"));
+  const ids = accts.map((a) => a.id);
+  const [imps, snaps] = await Promise.all([
+    db.from("imports").select("account_id,period_end").eq("status", "committed").in("account_id", ids).not("period_end", "is", null).then(ok),
+    // Statements loaded when the app was set up left a balance anchor on their closing date.
+    db.from("balance_snapshots").select("account_id,as_of").eq("kind", "opening").in("account_id", ids).then(ok),
+  ]);
+  return accts.map((a) => {
+    const ends = [...imps.filter((i) => i.account_id === a.id).map((i) => i.period_end!), ...snaps.filter((s) => s.account_id === a.id).map((s) => s.as_of)];
+    const last = ends.length ? ends.sort().at(-1)! : null;
+    return { account: a.name, ...statementStatus(last as ISODate | null, today) };
+  });
+}
+
+/**
+ * What needs attention, for the weekly check-in with Claude: statements out
+ * but not imported, and transactions with no category (any month).
+ */
+export async function getCheckup() {
+  const { db, today } = await authed();
+  const [statements, rows] = await Promise.all([
+    statementChecklist(db, today),
+    db
+      .from("transactions")
+      .select("id,date,amount_cents,description,note,source,account:accounts!transactions_account_id_fkey(name),transaction_splits(id)")
+      .is("category_id", null)
+      .eq("in_reports", true)
+      .eq("is_transfer", false)
+      .order("date", { ascending: false })
+      .limit(200)
+      .then(ok),
+  ]);
+  const uncategorized = rows.filter((r) => !r.transaction_splits.length).slice(0, 50);
+  return {
+    today,
+    statements,
+    uncategorized: uncategorized.map((r) => ({
+      id: r.id,
+      date: r.date as ISODate,
+      amount_cents: Number(r.amount_cents),
+      description: r.description,
+      note: r.note,
+      account: r.account?.name ?? "",
+    })),
+  };
 }
