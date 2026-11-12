@@ -1,8 +1,12 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import Link from "next/link";
 import { Bot, CalendarClock, ChartPie, ChevronRight, CreditCard, FileUp, LogOut, ShieldCheck, Tags, Target, TrendingUp, Wallet } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
+import { BackupCard } from "@/components/backup-card";
 import { ChangePinForm } from "@/components/change-pin-form";
+import { Skeleton } from "@/components/ui/skeleton";
+import { getBackupStatus } from "@/lib/data";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -37,6 +41,10 @@ export default function SettingsPage() {
         <ChangePinForm />
       </section>
 
+      <Suspense fallback={<Skeleton className="h-[212px] rounded-2xl" />}>
+        <Backup />
+      </Suspense>
+
       <nav aria-label="More" className="divide-y divide-border rounded-2xl bg-surface-1 px-4">
         {MORE.map(({ href, label, hint, icon: Icon }) => (
           <Link key={href} href={href} className="flex items-center gap-3 py-3">
@@ -62,4 +70,8 @@ export default function SettingsPage() {
       </form>
     </div>
   );
+}
+
+async function Backup() {
+  return <BackupCard status={await getBackupStatus()} />;
 }

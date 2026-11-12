@@ -489,14 +489,16 @@ export async function getStudentLoan() {
  * Student loan state. Payments = spending in the "student_loan" category
  * (the EMI part of each Remitly transfer; the rest is money for home).
  */
-async function getLoanFor(db: Db, today: ISODate, bal: Balance[]) {
+async function getLoanFor(db: Db, today: ISODate, bal: Balance[], userId?: string) {
   const acct = bal.find((b) => b.key === "student_loan");
   if (!acct) return null;
   const [meta, snap, cat] = await Promise.all([
     db.from("accounts").select("apr,monthly_payment_cents,borrowed_native,emi_native").eq("id", acct.account_id).single().then(ok),
     db.from("balance_snapshots").select("as_of,amount_cents,native_amount,fx_rate,created_at")
       .eq("account_id", acct.account_id).order("as_of", { ascending: false }).order("created_at", { ascending: false }).limit(1).single().then(ok),
-    db.from("categories").select("id").eq("key", "student_loan").maybeSingle().then(okMaybe),
+    (userId ? db.from("categories").select("id").eq("key", "student_loan").eq("user_id", userId) : db.from("categories").select("id").eq("key", "student_loan"))
+      .maybeSingle()
+      .then(okMaybe),
   ]);
   // A payment recorded after the balance was set on the same day still counts.
   let payments: { date: ISODate; cents: number; afterAnchor: boolean }[] = [];
@@ -2028,4 +2030,72 @@ export async function listAccountsForChanges() {
   return ok(
     await db.from("accounts").select("id,key,name,account_group").eq("archived", false).not("account_group", "in", "(legacy,cash_emergency)").order("sort_order"),
   ).map((a) => ({ id: a.id, name: a.name, group: a.account_group, key: a.key }));
+}
+
+// ───────────────────────────── backup (owner, Nov 11 2026) ─────────────────────────────
+
+/**
+ * Each account's balance as the app shows it (the student loan with its EMIs
+ * taken off), for the backup. `db` may be the service-role client (weekly
+ * email), so everything is filtered by user_id.
+ */
+export async function appBalances(db: Db, userId: string, today: ISODate): Promise<Map<string, number>> {
+  const rows = ok(
+    await db.from("account_balances").select("account_id,key,name,account_group,hidden,balance_cents").eq("user_id", userId).neq("account_group", "legacy"),
+  );
+  const bal: Balance[] = rows.map((b) => ({
+    account_id: b.account_id!,
+    key: b.key!,
+    name: b.name!,
+    account_group: b.account_group!,
+    hidden: Boolean(b.hidden),
+    balance_cents: Number(b.balance_cents),
+  }));
+  const out = new Map(bal.map((b) => [b.account_id, b.balance_cents]));
+  const loan = await getLoanFor(db, today, bal, userId);
+  const loanAcct = bal.find((b) => b.key === "student_loan");
+  if (loan && loanAcct) out.set(loanAcct.account_id, -loan.owed);
+  return out;
+}
+
+/** When the last weekly email went out / you last exported, and whether the email is set up. */
+export async function getBackupStatus() {
+  const { db } = await session();
+  const { backupEmailConfigured } = await import("./backup-email");
+  const p = okMaybe(await db.from("profiles").select("last_backup_emailed_at,last_export_at").maybeSingle());
+  return {
+    emailedAt: p?.last_backup_emailed_at ?? null,
+    exportedAt: p?.last_export_at ?? null,
+    /** The weekly job can run: Resend key + cron secret are set. */
+    emailReady: backupEmailConfigured() && !!process.env.CRON_SECRET,
+    /** "Email it now" works: the Resend key is set. */
+    emailConfigured: backupEmailConfigured(),
+  };
+}
+
+/**
+ * A full backup for the signed-in owner, behind the PIN (it includes the
+ * emergency fund). Never over Claude: the connector has no route to it.
+ * `email`: send it to your inbox instead of returning the file.
+ */
+export async function ownerBackup(pin: string, how: "download" | "email") {
+  if (userContext.getStore()) throw new Error("Backups aren't available over the connector.");
+  const check = await verifyOwnerPin(pin);
+  if (!check.ok) return check;
+  const { db, today } = await authed();
+  const { data: claims } = await db.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  if (!userId) throw new Error("Not signed in.");
+  const { buildBackup } = await import("./backup");
+  const file = await buildBackup(db, userId, today, await appBalances(db, userId, today));
+  if (how === "email") {
+    const { emailBackup } = await import("./backup-email");
+    const email = claims.claims.email;
+    if (typeof email !== "string" || !email) throw new Error("No email address on your account.");
+    await emailBackup(email, today, file);
+    ok(await db.from("profiles").update({ last_backup_emailed_at: new Date().toISOString() }).eq("user_id", userId).select("user_id"));
+    return { ok: true as const, emailedTo: email };
+  }
+  ok(await db.from("profiles").update({ last_export_at: new Date().toISOString() }).eq("user_id", userId).select("user_id"));
+  return { ok: true as const, fileName: file.fileName, zip: file.zip };
 }
