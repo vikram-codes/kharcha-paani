@@ -12,8 +12,10 @@ export type ParsedRow = { date: string; posted: string | null; amount_cents: num
 export type Check = { name: string; got: number; want: number; ok: boolean };
 export type ParsedStatement = {
   source: StatementSource;
-  /** Last day the statement covers (YYYY-MM-DD), when found. */
+  /** The statement's closing date (YYYY-MM-DD), the last day it covers. */
   periodEnd: string | null;
+  /** Card statements: when payment is due and how much (cents, positive = owed). */
+  payment: { dueDate: string; balanceCents: number | null; minimumCents: number | null } | null;
   rows: ParsedRow[];
   checks: Check[];
 };
@@ -37,6 +39,44 @@ function findPeriodEnd(text: string): { y: number; m: number; iso: string } | nu
   }
   if (!best) return null;
   return { y: best.y, m: best.m, iso: `${best.y}-${String(best.m + 1).padStart(2, "0")}-${String(best.d).padStart(2, "0")}` };
+}
+
+const DATE = `(${MON})\\s+(\\d{1,2}),?\\s+(20\\d\\d)`;
+/** The first "Month D, YYYY" right after `label` (spaces and line breaks between are fine). */
+function dateAfter(text: string, label: string): string | null {
+  const m = new RegExp(`${label}\\s+${DATE}`, "i").exec(text);
+  if (!m) return null;
+  const mon = monthIndex(m[1]);
+  // MON has its own group, so: [1] month word, [3] day, [4] year.
+  return mon < 0 ? null : `${m[4]}-${String(mon + 1).padStart(2, "0")}-${String(Number(m[3])).padStart(2, "0")}`;
+}
+/**
+ * A dollar amount right after `label` on the same line. Spaces and symbols in
+ * between are skipped ("New Balance‡ = $467.33"), words aren't. "CR" after it
+ * means a credit (you're owed).
+ */
+function amountAfter(text: string, label: string): number | null {
+  const m = new RegExp(`${label}[^\\w$\\n]{0,80}\\$\\s*([\\d,]+\\.\\d\\d)(\\s*CR)?`, "i").exec(text);
+  return m ? cents(m[1]) * (m[2] ? -1 : 1) : null;
+}
+
+/**
+ * Closing date and payment due (owner, Nov 11 2026). The latest date in a
+ * card statement is its payment due date, not the day it closed, so the
+ * labels are read instead.
+ */
+function statementDates(source: StatementSource, text: string) {
+  if (source === "scotia_chequing") return { closing: dateAfter(text, "Closing\\s+Balance\\s+on"), payment: null };
+  const closing = dateAfter(text, "Statement\\s+date:?");
+  const dueDate = source === "cibc_costco" ? dateAfter(text, "pay\\s+this\\s+amount\\s+by") : dateAfter(text, "Payment\\s+due\\s+date:?");
+  const balanceCents =
+    source === "triangle"
+      ? amountAfter(text, "Balance\\s+Due")
+      : source === "cibc_costco"
+        ? amountAfter(text, "Total\\s+balance")
+        : amountAfter(text, "New\\s+Balance");
+  const minimumCents = amountAfter(text, "Minimum\\s+payment(?:\\s+due)?");
+  return { closing, payment: dueDate ? { dueDate, balanceCents, minimumCents } : null };
 }
 
 /** "Oct", "5" → ISO date, placing December rows of a January statement in the previous year. */
@@ -64,7 +104,8 @@ export function parseStatement(text: string): ParsedStatement {
   const end = findPeriodEnd(text);
   if (!end) throw new Error("Couldn't find the statement dates.");
   const parsed = { scotia_chequing, scotia_visa, cibc_costco, triangle }[source](text, end);
-  return { source, periodEnd: end.iso, ...parsed };
+  const { closing, payment } = statementDates(source, text);
+  return { source, periodEnd: closing ?? end.iso, payment, ...parsed };
 }
 
 // ───────────────────────────── Scotiabank chequing ─────────────────────────────

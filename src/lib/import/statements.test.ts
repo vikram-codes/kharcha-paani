@@ -23,6 +23,59 @@ Closing Balance on September 30, 2026   $1,250.00
               Opos Remitly* S48Fe Vanco
 `;
 
+// Statement headers with the payment box, as each card prints it.
+const cards = {
+  triangle: `Triangle Mastercard   Canadian Tire Bank
+Statement date: October 18, 2026
+For the period: September 19, 2026 to October 18, 2026
+Your New Balance $2,995.00
+Pay this amount by the Payment due date indicated below to avoid interest
+Balance Due $2,995.00
+Minimum payment due $66.73
+Payment due date Nov 9, 2026`,
+  cibc: `CIBC Costco Mastercard
+                                       Statement Date
+                                       October 18, 2026
+  Your account at a glance             October statement period
+                                       September 19 to October 18, 2026
+  Previous balance          $177.07
+  Total balance             =     $1,579.50
+  Minimum Payment due by
+  Minimum Payment                      $10.00
+  Please pay this amount by Nov 09, 2026
+  days of this Statement Date. If you do not`,
+  scotia: `Statement  Period      Oct 6, 2026 - Nov 5, 2026
+Statement  Date                    Nov 5, 2026
+SUB-TOTAL DEBITS   $0.00
+Payment   Due  Date   Nov  26, 2026
+New   Balance‡   =   $0.00
+Total Minimum   Payment   $0.00
+Account   Balance   =   $1.67  CR`,
+};
+
+describe("statement dates and payment due", () => {
+  it("reads the closing date, not the later payment due date", () => {
+    expect(parseStatement(cards.triangle).periodEnd).toBe("2026-10-18");
+    expect(parseStatement(cards.scotia).periodEnd).toBe("2026-11-05");
+    expect(parseStatement(chequing).periodEnd).toBe("2026-09-30");
+  });
+
+  it("reads each card's due date, statement balance and minimum", () => {
+    expect(parseStatement(cards.triangle).payment).toEqual({ dueDate: "2026-11-09", balanceCents: 299500, minimumCents: 6673 });
+    expect(parseStatement(cards.scotia).payment).toEqual({ dueDate: "2026-11-26", balanceCents: 0, minimumCents: 0 });
+    expect(parseStatement(chequing).payment).toBeNull();
+  });
+
+  it("reads CIBC's column layout", async () => {
+    const { detectStatement: d } = await import("./statements");
+    const text = cards.cibc;
+    expect(d(text)).toBe("cibc_costco");
+    const s = parseStatement(text);
+    expect(s.periodEnd).toBe("2026-10-18");
+    expect(s.payment).toEqual({ dueDate: "2026-11-09", balanceCents: 157950, minimumCents: 1000 });
+  });
+});
+
 describe("statement parsing", () => {
   it("detects the bank from the text", () => {
     expect(detectStatement(triangleJan)).toBe("triangle");

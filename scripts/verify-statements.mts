@@ -15,7 +15,7 @@ for (const f of readdirSync("statements").filter((x) => x.endsWith(".pdf")).sort
     const same = JSON.stringify(want) === JSON.stringify(got);
     const checksOk = s.checks.every((c) => c.ok);
     allOk &&= same && checksOk;
-    console.log(`${checksOk && same ? "OK  " : "FAIL"} ${f.padEnd(34)} ${s.source.padEnd(16)} ${String(s.rows.length).padStart(3)} rows  end ${s.periodEnd}  checks:${s.checks.map((c) => (c.ok ? "✓" : `✗(${c.got}≠${c.want})`)).join("")}  ${same ? "matches seed" : `seed ${want.length} vs ${got.length}`}`);
+    console.log(`${checksOk && same ? "OK  " : "FAIL"} ${f.padEnd(34)} ${s.source.padEnd(16)} ${String(s.rows.length).padStart(3)} rows  end ${s.periodEnd}${s.payment ? `  due ${s.payment.dueDate} bal ${s.payment.balanceCents} min ${s.payment.minimumCents}` : ""}  checks:${s.checks.map((c) => (c.ok ? "✓" : `✗(${c.got}≠${c.want})`)).join("")}  ${same ? "matches seed" : `seed ${want.length} vs ${got.length}`}`);
     if (!same) {
       const g = new Set(got), w = new Set(want);
       console.log("   missing:", want.filter((x) => !g.has(x)).slice(0, 5), " extra:", got.filter((x) => !w.has(x)).slice(0, 5));
