@@ -6,21 +6,22 @@ import { isMonthKey } from "@/lib/dates";
 import { TransactionsView } from "./transactions-view";
 
 /** Shared by /transactions (this month) and /transactions/YYYY-MM. */
-export function TransactionsPage({ month }: { month: Promise<string | undefined> }) {
+export function TransactionsPage({ month, openId }: { month: Promise<string | undefined>; openId?: Promise<string | undefined> }) {
   return (
     <div className="mx-auto max-w-md md:max-w-3xl">
       <Reveal fallback={<TransactionsSkeleton />}>
-        <Loader month={month} />
+        <Loader month={month} openId={openId} />
       </Reveal>
     </div>
   );
 }
 
-async function Loader({ month }: { month: Promise<string | undefined> }) {
+async function Loader({ month, openId }: { month: Promise<string | undefined>; openId?: Promise<string | undefined> }) {
   const m = await month;
+  const open = await openId;
   if (m !== undefined && (!isMonthKey(m) || m < FIRST_ACTIVITY_MONTH)) notFound();
   const initial = await getActivity(m);
-  return <TransactionsView initial={initial} firstMonth={FIRST_ACTIVITY_MONTH} />;
+  return <TransactionsView initial={initial} firstMonth={FIRST_ACTIVITY_MONTH} openId={open} />;
 }
 
 function TransactionsSkeleton() {

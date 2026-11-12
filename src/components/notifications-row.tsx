@@ -8,7 +8,7 @@ import { ResponsiveSheetContent } from "@/components/ui/responsive-sheet";
 import { Sheet, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-type Kind = "bills" | "payday" | "budget" | "catchup";
+type Kind = "bills" | "payday" | "budget" | "catchup" | "applepay";
 export type NotificationSettings = {
   configured: boolean;
   publicKey: string | null;
@@ -21,6 +21,7 @@ const KINDS: { kind: Kind; label: string; hint: string }[] = [
   { kind: "payday", label: "Payday", hint: "Payday morning, 9 am" },
   { kind: "budget", label: "Monthly budget", hint: "At 80% and 100%" },
   { kind: "catchup", label: "Sunday catch-up", hint: "Sundays at 3 pm" },
+  { kind: "applepay", label: "Apple Pay purchases", hint: "Amount, place and category after each tap" },
 ];
 
 /** VAPID public key (base64url) → the bytes pushManager.subscribe wants. */
@@ -143,7 +144,7 @@ export function NotificationsRow({ settings }: { settings: NotificationSettings 
           <div className="flex flex-col gap-4 px-5 pt-2 pb-6 md:pt-5">
             <div>
               <SheetTitle className="text-base font-semibold">Notifications</SheetTitle>
-              <SheetDescription className="text-xs">Reminders only. They never show amounts or balances.</SheetDescription>
+              <SheetDescription className="text-xs">Reminders never show amounts. Apple Pay ones show what you just paid.</SheetDescription>
             </div>
 
             {!settings.configured ? (

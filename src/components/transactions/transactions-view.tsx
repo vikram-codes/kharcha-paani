@@ -32,7 +32,7 @@ const monthFromPath = (path: string) => (/^\/transactions\/(\d{4}-\d{2})$/.exec(
  * bills greyed, rows grouped by day with each day's spending. Months switch in
  * place (old list stays, dimmed, until the next loads). Tap a row to edit.
  */
-export function TransactionsView({ initial, firstMonth }: { initial: Activity; firstMonth: string }) {
+export function TransactionsView({ initial, firstMonth, openId }: { initial: Activity; firstMonth: string; openId?: string }) {
   const pathname = usePathname();
   const urlMonth = monthFromPath(pathname) ?? initial.current;
   const cache = useRef(new Map<string, Activity>([[initial.month, initial]]));
@@ -40,7 +40,8 @@ export function TransactionsView({ initial, firstMonth }: { initial: Activity; f
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [showTransfers, setShowTransfers] = useState(true);
-  const [open, setOpen] = useState<ActivityRow | null>(null);
+  // Opened from a notification (?tx=<id>): that transaction starts open.
+  const [open, setOpen] = useState<ActivityRow | null>(() => (openId ? (initial.rows.find((r) => r.id === openId) ?? null) : null));
   const [reload, setReload] = useState(0);
 
   // Load the month in the URL (keeps the current list until it arrives).

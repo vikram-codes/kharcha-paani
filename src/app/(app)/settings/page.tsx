@@ -3,11 +3,12 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { Bot, CalendarClock, ChartPie, ChevronRight, CreditCard, FileUp, LogOut, ShieldCheck, Tags, Target, TrendingUp, Wallet } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
+import { ApplePayRow } from "@/components/applepay-row";
 import { BackupRow } from "@/components/backup-row";
 import { ChangePinForm } from "@/components/change-pin-form";
 import { NotificationsRow } from "@/components/notifications-row";
 import { Skeleton } from "@/components/ui/skeleton";
-import { getBackupStatus, getNotificationSettings } from "@/lib/data";
+import { getApplePaySettings, getBackupStatus, getNotificationSettings } from "@/lib/data";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -56,6 +57,9 @@ export default function SettingsPage() {
           </Link>
         ))}
         <Suspense fallback={<Skeleton className="my-3 h-10 rounded-xl" />}>
+          <ApplePay />
+        </Suspense>
+        <Suspense fallback={<Skeleton className="my-3 h-10 rounded-xl" />}>
           <Notifications />
         </Suspense>
         <Suspense fallback={<Skeleton className="my-3 h-10 rounded-xl" />}>
@@ -81,4 +85,8 @@ async function Backup() {
 
 async function Notifications() {
   return <NotificationsRow settings={await getNotificationSettings()} />;
+}
+
+async function ApplePay() {
+  return <ApplePayRow settings={await getApplePaySettings()} />;
 }
