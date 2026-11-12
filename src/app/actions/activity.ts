@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { FIRST_ACTIVITY_MONTH, SPLIT_NEEDS_UPDATE, activityData, deleteTransaction, getEditOptions, searchActivity, updateTransaction, type SplitLine, type TransactionPatch } from "@/lib/data";
+import { after } from "next/server";
+import { FIRST_ACTIVITY_MONTH, SPLIT_NEEDS_UPDATE, activityData, sendReminders, deleteTransaction, getEditOptions, searchActivity, updateTransaction, type SplitLine, type TransactionPatch } from "@/lib/data";
 import { isMonthKey } from "@/lib/dates";
 
 export async function loadActivity(month: string) {
@@ -20,6 +21,7 @@ const fail = (e: unknown): Result => ({ ok: false, error: e instanceof Error ? e
 export async function saveTransaction(id: string, patch: TransactionPatch, splits?: SplitLine[]): Promise<Result & { needsSplit?: boolean }> {
   try {
     await updateTransaction(id, patch, splits);
+    after(() => sendReminders("budget").then(() => undefined, (e) => console.error("[push] budget check", e)));
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (e) {

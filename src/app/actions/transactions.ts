@@ -1,7 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createManualTransaction, createTransfer, getQuickAddOptions, type NewTransaction } from "@/lib/data";
+import { after } from "next/server";
+import { createManualTransaction, createTransfer, getQuickAddOptions, sendReminders, type NewTransaction } from "@/lib/data";
+
+/** After a save: tell the phone if this month just passed 80% or 100% of the budget. */
+const checkBudget = () => after(() => sendReminders("budget").then(() => undefined, (e) => console.error("[push] budget check", e)));
 
 export async function loadQuickAdd() {
   return getQuickAddOptions();
@@ -10,6 +14,7 @@ export async function loadQuickAdd() {
 export async function addTransaction(input: NewTransaction): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
   try {
     const saved = await createManualTransaction(input);
+    if (input.kind === "expense") checkBudget();
     // Every screen's totals change: refresh them (incl. the privately cached summaries).
     revalidatePath("/", "layout");
     return { ok: true, message: `${saved.category} · ${saved.account}` };

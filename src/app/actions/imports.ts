@@ -1,7 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { commitStatementImport, getEditOptions, previewStatement, undoImport, type ImportCommit } from "@/lib/data";
+import { after } from "next/server";
+import { commitStatementImport, getEditOptions, previewStatement, sendReminders, undoImport, type ImportCommit } from "@/lib/data";
 
 const MAX_BYTES = 3 * 1024 * 1024;
 
@@ -21,6 +22,7 @@ export async function previewImport(form: FormData) {
 export async function confirmImport(input: ImportCommit) {
   try {
     const res = await commitStatementImport(input);
+    after(() => sendReminders("budget").then(() => undefined, (e) => console.error("[push] budget check", e)));
     revalidatePath("/", "layout");
     return { ok: true as const, ...res };
   } catch (e) {

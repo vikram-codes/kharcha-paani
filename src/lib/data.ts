@@ -2099,3 +2099,82 @@ export async function ownerBackup(pin: string, how: "download" | "email") {
   ok(await db.from("profiles").update({ last_export_at: new Date().toISOString() }).eq("user_id", userId).select("user_id"));
   return { ok: true as const, fileName: file.fileName, zip: file.zip };
 }
+
+// ───────────────────────────── phone reminders (#3, owner, Nov 11 2026) ─────────────────────────────
+
+export type ReminderRun = "morning" | "catchup" | "budget" | "test";
+
+/**
+ * Works out and sends the signed-in owner's reminders. "morning" (9 am):
+ * bills due tomorrow and today, payday, and the budget as a fallback.
+ * "catchup": Sunday 3 pm. "budget": right after a save. Runs in the browser's
+ * session, or inside runAsUser() for the reminder job.
+ */
+export async function sendReminders(which: ReminderRun): Promise<number> {
+  const { db, today } = await authed();
+  const [{ deliver }, r, { formatMonthName }] = await Promise.all([import("./push"), import("./reminders"), import("./dates")]);
+  const list: import("./reminders").Reminder[] = [];
+  if (which === "test") list.push({ kind: "test", keys: [], title: "Reminders are on", body: "This is how Kharcha-Paani reminders will look.", url: "/settings" });
+  if (which === "catchup") list.push(r.catchupReminder(today));
+  if (which === "morning") {
+    const cats = await categories(db);
+    const [bills, income] = await Promise.all([upcoming(db, today, cats), incomeSettings(db)]);
+    list.push(...r.billReminders(today, addDays(today, 1), bills));
+    const pay = income ? r.paydayReminder(today, nextPayday(income.schedule, today).paid) : null;
+    if (pay) list.push(pay);
+  }
+  if (which === "morning" || which === "budget") {
+    const month = monthKey(today);
+    const cats = await categories(db);
+    const [rows, lines, prof] = await Promise.all([monthLedger(db, month, cats), budgetLines(db, month), profile(db)]);
+    const status = budgetStatus(lines, spentByCategory(rows));
+    const b = r.budgetReminder(month, formatMonthName(month), status.spent, prof.monthlyBudget ?? status.budget);
+    if (b) list.push(b);
+  }
+  return deliver(db, list);
+}
+
+/** Settings → Notifications: set up on the server? which kinds are on, how many devices. */
+export async function getNotificationSettings() {
+  const { db } = await session();
+  const { pushConfigured } = await import("./push");
+  const [p, subs] = await Promise.all([
+    db.from("profiles").select("notify_bills,notify_payday,notify_budget,notify_catchup").maybeSingle().then(okMaybe),
+    db.from("push_subscriptions").select("endpoint,device").then(ok),
+  ]);
+  return {
+    configured: pushConfigured(),
+    publicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? null,
+    prefs: { bills: p?.notify_bills ?? true, payday: p?.notify_payday ?? true, budget: p?.notify_budget ?? true, catchup: p?.notify_catchup ?? true },
+    endpoints: subs.map((s) => s.endpoint),
+  };
+}
+
+export type NotifyKind = "bills" | "payday" | "budget" | "catchup";
+
+export async function setNotificationPref(kind: NotifyKind, on: boolean) {
+  const { db } = await authed();
+  const col = ({ bills: "notify_bills", payday: "notify_payday", budget: "notify_budget", catchup: "notify_catchup" } as const)[kind];
+  if (!col) throw new Error("Unknown reminder.");
+  const p = okMaybe(await db.from("profiles").select("user_id").maybeSingle());
+  if (!p) throw new Error("Profile not found.");
+  const patch: Partial<Record<typeof col, boolean>> = { [col]: Boolean(on) };
+  ok(await db.from("profiles").update(patch).eq("user_id", p.user_id).select("user_id"));
+}
+
+/** This device turned notifications on: remember where to send them. */
+export async function savePushSubscription(sub: { endpoint: string; p256dh: string; auth: string; device?: string }) {
+  const { db } = await authed();
+  if (!/^https:\/\/[^\s]+$/.test(sub.endpoint) || sub.endpoint.length > 1000 || !sub.p256dh || !sub.auth) throw new Error("That device's subscription looks wrong.");
+  ok(
+    await db
+      .from("push_subscriptions")
+      .upsert({ endpoint: sub.endpoint, p256dh: sub.p256dh, auth: sub.auth, device: sub.device?.slice(0, 80) ?? null }, { onConflict: "user_id,endpoint" })
+      .select("id"),
+  );
+}
+
+export async function removePushSubscription(endpoint: string) {
+  const { db } = await authed();
+  ok(await db.from("push_subscriptions").delete().eq("endpoint", endpoint).select("id"));
+}

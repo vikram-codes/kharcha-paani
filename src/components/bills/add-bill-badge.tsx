@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { Plus } from "lucide-react";
 import type { Upcoming } from "@/lib/data";
 import { QuickAddSheet } from "@/components/shell/quick-add-sheet";
@@ -9,6 +10,16 @@ import { QuickAddSheet } from "@/components/shell/quick-add-sheet";
  * bill filled in. Once saved, the bill counts as added and moves on.
  */
 export function AddBillBadge({ bill }: { bill: Upcoming }) {
+  // A "due today" reminder opens /?add=<bill id>: tap this bill's Add for you.
+  const button = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("add") !== bill.id) return;
+    q.delete("add");
+    window.history.replaceState(null, "", window.location.pathname + (q.size ? `?${q}` : ""));
+    button.current?.click();
+  }, [bill.id]);
+
   return (
     <QuickAddSheet
       prefill={{
@@ -21,6 +32,7 @@ export function AddBillBadge({ bill }: { bill: Upcoming }) {
       }}
       trigger={
         <button
+          ref={button}
           type="button"
           aria-label={`Add ${bill.name}`}
           className="flex shrink-0 items-center gap-0.5 rounded-full bg-lime py-1 pr-2.5 pl-2 text-[11px] font-semibold text-on-lime transition-transform duration-(--duration-fast) active:scale-95"

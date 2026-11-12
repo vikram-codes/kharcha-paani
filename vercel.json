@@ -1,4 +1,10 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "crons": [{ "path": "/api/cron/backup", "schedule": "0 13 * * 0" }]
+  "crons": [
+    { "path": "/api/cron/backup", "schedule": "0 13 * * 0" },
+    { "path": "/api/cron/reminders?slot=edt-morning", "schedule": "0 13 * * *" },
+    { "path": "/api/cron/reminders?slot=est-morning", "schedule": "0 14 * * *" },
+    { "path": "/api/cron/reminders?slot=edt-sunday", "schedule": "0 19 * * 0" },
+    { "path": "/api/cron/reminders?slot=est-sunday", "schedule": "0 20 * * 0" }
+  ]
 }
