@@ -17,11 +17,11 @@ export async function downloadBackup(pin: string): Promise<{ ok: true; fileName:
 }
 
 /** Emails the backup now (also tests that the monthly email works). */
-export async function emailBackupNow(pin: string): Promise<{ ok: true; emailedTo: string } | Fail> {
+export async function emailBackupNow(pin: string): Promise<{ ok: true; emailedTo: string; fileName: string | null } | Fail> {
   try {
     const r = await ownerBackup(String(pin ?? ""), "email");
     if (!r.ok) return { ok: false, error: r.error };
-    return r.emailedTo ? { ok: true, emailedTo: r.emailedTo } : { ok: false, error: "Backup failed." };
+    return r.emailedTo ? { ok: true, emailedTo: r.emailedTo, fileName: r.fileName ?? null } : { ok: false, error: "Backup failed." };
   } catch (e) {
     return fail(e);
   }

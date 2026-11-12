@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Archive, ChevronRight, Download, FileJson, FileSpreadsheet, Loader2, Lock, Mail, TriangleAlert } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { motion, useReducedMotion } from "motion/react";
+import { Archive, ChevronRight, Download, FileJson, FileSpreadsheet, Loader2, Lock, Mail, MailCheck, Send, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { downloadBackup, emailBackupNow } from "@/app/actions/backup";
 import { PinPad } from "@/components/pin-pad";
@@ -42,6 +44,11 @@ export function BackupRow({ status }: { status: BackupStatus }) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>("menu");
   const [ready, setReady] = useState<{ fileName: string; zip: Uint8Array } | null>(null);
+  // "Email it now": a sending card while it's built and sent, then a sent card.
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState<{ to: string; fileName: string | null } | null>(null);
+  const router = useRouter();
+  const still = useReducedMotion();
   const [saving, startSaving] = useTransition();
   const late = status.emailReady && !!status.emailedAt && daysBetween(todayISO(new Date(status.emailedAt)), todayISO()) > LATE_DAYS;
   const next = nextFirst();
@@ -50,6 +57,9 @@ export function BackupRow({ status }: { status: BackupStatus }) {
     setOpen(false);
     setStep("menu");
     setReady(null);
+    setSending(false);
+    if (sent) router.refresh(); // "Last emailed" → just now
+    setSent(null);
   };
 
   // Saving needs a fresh tap (iOS only opens the share sheet from one), so it's its own button.
@@ -94,13 +104,17 @@ export function BackupRow({ status }: { status: BackupStatus }) {
         <ResponsiveSheetContent>
           <div className="flex flex-col gap-4 px-5 pt-2 pb-6 md:pt-5">
             <div>
-              <SheetTitle className="text-base font-semibold">{ready ? "Backup ready" : step === "menu" ? "Backup" : "Enter your PIN"}</SheetTitle>
-              <SheetDescription className="text-xs">
+              <SheetTitle className="text-base font-semibold">
+                {ready ? "Backup ready" : step === "menu" ? "Backup" : sending || sent ? "Email a backup" : "Enter your PIN"}
+              </SheetTitle>
+              <SheetDescription className={cn("text-xs", (sending || sent) && "sr-only")}>
                 {ready
                   ? `${ready.fileName} · ${(ready.zip.byteLength / 1024).toFixed(0)} KB. Save it to Files or iCloud Drive.`
                   : step === "menu"
                     ? "A full copy of everything, in one zip. It's emailed to you on the 1st of every month."
-                    : "The backup includes your emergency fund."}
+                    : sent
+                      ? "Your backup was sent."
+                      : "The backup includes your emergency fund."}
               </SheetDescription>
             </div>
 
@@ -167,23 +181,77 @@ export function BackupRow({ status }: { status: BackupStatus }) {
                   </p>
                 </div>
               </>
+            ) : sent ? (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25 }}
+                className="flex flex-col items-center gap-3 pt-2 text-center"
+                role="status"
+              >
+                <motion.span
+                  initial={still ? false : { scale: 0.4, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ type: "spring", stiffness: 320, damping: 16 }}
+                  className="grid size-20 place-items-center rounded-full bg-money-in/15"
+                >
+                  <MailCheck className="size-9 text-money-in" />
+                </motion.span>
+                <div>
+                  <p className="text-base font-semibold">Backup sent</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    To <span className="font-medium text-foreground">{sent.to}</span>. It&apos;ll arrive in a minute or so.
+                  </p>
+                </div>
+                {sent.fileName && <p className="num rounded-lg bg-surface-1 px-3 py-1.5 text-[11px] text-muted-foreground ring-1 ring-border">{sent.fileName}</p>}
+                <button type="button" onClick={close} className={cn(option, "mt-2 justify-center text-sm font-medium")}>
+                  Done
+                </button>
+              </motion.div>
             ) : (
-              <div className="flex justify-center">
-                <PinPad
-                  check={async (pin) => {
-                    if (step === "email") {
-                      const res = await emailBackupNow(pin);
+              <div className="flex flex-col items-center">
+                {sending && (
+                  <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center gap-3 py-6 text-center" role="status">
+                    <span className="grid size-20 place-items-center rounded-3xl bg-surface-1 ring-1 ring-border">
+                      <motion.span
+                        animate={still ? undefined : { x: [0, 4, 0], y: [0, -5, 0], rotate: [0, -8, 0] }}
+                        transition={{ duration: 1.2, repeat: Infinity, ease: "easeInOut" }}
+                      >
+                        <Send className="size-8 text-lime-ink" />
+                      </motion.span>
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold">Sending your backup…</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Building the zip and emailing it. This takes a few seconds.</p>
+                    </div>
+                    <span className="block h-1 w-40 overflow-hidden rounded-full bg-surface-2">
+                      <motion.span
+                        className="block h-full w-1/3 rounded-full bg-lime"
+                        animate={still ? undefined : { x: ["-100%", "300%"] }}
+                        transition={{ duration: 1.1, repeat: Infinity, ease: "easeInOut" }}
+                      />
+                    </span>
+                  </motion.div>
+                )}
+                {/* Kept mounted while sending, so a wrong PIN can still shake and show its message. */}
+                <div className={cn(sending && "hidden")}>
+                  <PinPad
+                    check={async (pin) => {
+                      if (step === "email") {
+                        setSending(true);
+                        const res = await emailBackupNow(pin);
+                        setSending(false);
+                        if (!res.ok) return res.error;
+                        setSent({ to: res.emailedTo, fileName: res.fileName });
+                        return null;
+                      }
+                      const res = await downloadBackup(pin);
                       if (!res.ok) return res.error;
-                      toast.success(`Backup emailed to ${res.emailedTo}`);
-                      close();
+                      setReady({ fileName: res.fileName, zip: res.zip });
                       return null;
-                    }
-                    const res = await downloadBackup(pin);
-                    if (!res.ok) return res.error;
-                    setReady({ fileName: res.fileName, zip: res.zip });
-                    return null;
-                  }}
-                />
+                    }}
+                  />
+                </div>
               </div>
             )}
           </div>

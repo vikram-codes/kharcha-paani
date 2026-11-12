@@ -2131,7 +2131,7 @@ export async function sendBackupEmail(kind: "monthly" | "now") {
   if (!userId || typeof to !== "string" || !to) throw new Error("No email address on your account.");
   const month = kind === "monthly" ? monthKey(addDays(today, -1)) : monthKey(today);
   const logKey = `backup:${month}`;
-  if (kind === "monthly" && okMaybe(await db.from("notification_log").select("key").eq("key", logKey).maybeSingle())) return { to, skipped: true };
+  if (kind === "monthly" && okMaybe(await db.from("notification_log").select("key").eq("key", logKey).maybeSingle())) return { to, skipped: true, fileName: null };
 
   const [{ buildBackup }, { emailBackup }, { formatMonth, formatMonthName, formatDay }] = await Promise.all([import("./backup"), import("./backup-email"), import("./dates")]);
   const [file, m] = await Promise.all([buildBackup(db, userId, today, await appBalances(db, userId, today)), monthSummaryData(month)]);
@@ -2145,7 +2145,7 @@ export async function sendBackupEmail(kind: "monthly" | "now") {
   });
   ok(await db.from("profiles").update({ last_backup_emailed_at: new Date().toISOString() }).eq("user_id", userId).select("user_id"));
   if (kind === "monthly") await db.from("notification_log").upsert({ key: logKey }, { onConflict: "user_id,key", ignoreDuplicates: true });
-  return { to, skipped: false };
+  return { to, skipped: false, fileName: file.fileName };
 }
 
 /** When the last monthly email went out / you last exported, and whether the email is set up. */
@@ -2172,16 +2172,16 @@ export async function ownerBackup(pin: string, how: "download" | "email") {
   if (userContext.getStore()) throw new Error("Backups aren't available over the connector.");
   const check = await verifyOwnerPin(pin);
   if (!check.ok) return check;
+  if (how === "email") {
+    const sent = await sendBackupEmail("now");
+    return { ok: true as const, emailedTo: sent.to, fileName: sent.fileName };
+  }
   const { db, today } = await authed();
   const { data: claims } = await db.auth.getClaims();
   const userId = claims?.claims?.sub;
   if (!userId) throw new Error("Not signed in.");
   const { buildBackup } = await import("./backup");
   const file = await buildBackup(db, userId, today, await appBalances(db, userId, today));
-  if (how === "email") {
-    const sent = await sendBackupEmail("now");
-    return { ok: true as const, emailedTo: sent.to };
-  }
   ok(await db.from("profiles").update({ last_export_at: new Date().toISOString() }).eq("user_id", userId).select("user_id"));
   return { ok: true as const, fileName: file.fileName, zip: file.zip };
 }
