@@ -120,6 +120,7 @@ export function ImportFlow() {
         source: p.source,
         accountId: p.account.id,
         periodEnd: p.periodEnd,
+        payment: p.payment,
         rows: chosen.map(({ r, i }) => ({ date: r.date, posted: r.posted, amount_cents: r.amount_cents, description: r.description, fingerprint: r.fingerprint, categoryId: cats[i] })),
         links: linking.map(({ r }) => ({ existingIds: r.match!.ids, posted: r.posted, amount_cents: r.amount_cents, description: r.description, fingerprint: r.fingerprint })),
         skipped: p.rows.length - chosen.length - linking.length,

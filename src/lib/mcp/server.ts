@@ -11,6 +11,7 @@ import {
   getCash,
   getDebts,
   getEditOptions,
+  getCardPayments,
   getCheckup,
   getHome,
   getRecurringCharges,
@@ -34,7 +35,8 @@ export const INSTRUCTIONS = `Kharcha-Paani is the owner's personal finance app (
 Money model: Cash = bank accounts (the emergency fund is private and never shown here). Debts = credit cards + Affirm; the student loan (India, 9.5%) is separate. Card purchases count as spending when made and raise that card's debt; card payments are transfers, not spending.
 Budget: a monthly headline budget plus fixed and variable lines. "Spent" excludes transfers, friend paybacks and balance adjustments.
 Writing (full access: add, edit, move, delete, split, balances, owed money, bills, budget, rules, goals, investments): NEVER save without the owner's explicit yes. Always call the matching draft_* tool first (draft_transactions for new purchases/income, draft_transfer for card payments, draft_edit_transaction / draft_delete_transactions with ids from list_transactions, etc.), show the preview lines to the owner, and call confirm_draft only after they clearly agree in this conversation. If the draft reports problems (unclear category/account), ask the owner instead of guessing.
-Weekly check-in: the owner gets a Sunday 3 pm reminder to catch up and then talks to you. When they check in, or ask what needs attention, call get_checkup first. Tell them which statements are ready to import (by account, and how many if more than one is missed), and list any uncategorized transactions, suggesting a category for each from list_categories_and_accounts; file them only with draft_edit_transaction and their yes. Also mention any subscription price changes it lists. If nothing needs attention, say so in one line.
+Weekly check-in: the owner gets a Sunday 3 pm reminder to catch up and then talks to you. When they check in, or ask what needs attention, call get_checkup first. Tell them which statements are ready to import (by account, and how many if more than one is missed), and list any uncategorized transactions, suggesting a category for each from list_categories_and_accounts; file them only with draft_edit_transaction and their yes. Also mention card payments due in the next 10 days it lists (as facts) and any subscription price changes. If nothing needs attention, say so in one line.
+Credit card payments: use get_card_payments (due date, statement balance, minimum, paid since the statement, owed now). Report these as facts only. Never suggest how much to pay, paying cards down or any payoff plan; the owner tracks card interest as a cost and decides payments themselves.
 Subscriptions and recurring charges: use get_subscriptions (monthly and yearly totals, by group, with price changes and ones that stopped).
 Amounts in tool results are dollars. Expenses are negative in transaction lists.`;
 
@@ -43,6 +45,32 @@ const text = (v: unknown) => ({ content: [{ type: "text" as const, text: typeof 
 const fail = (e: unknown) => ({ ...text(`Error: ${e instanceof Error ? e.message : String(e)}`), isError: true });
 const READ = { readOnlyHint: true, openWorldHint: false } as const;
 const monthArg = z.string().regex(/^\d{4}-\d{2}$/).optional().describe("Month as YYYY-MM. Defaults to the current month.");
+
+type CardPayments = Awaited<ReturnType<typeof getCardPayments>>;
+const daysTo = (from: string, to: string) => Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
+
+/** One card as facts for Claude (#7). */
+function cardFacts(c: CardPayments["cards"][number], today: string) {
+  const s = c.statement;
+  const dueIn = s?.due ? daysTo(today, s.due) : null;
+  return {
+    card: c.name,
+    owed_now: $(c.owedNow),
+    last_statement: s
+      ? {
+          closed: s.closed,
+          payment_due: s.due ?? undefined,
+          due: dueIn === null ? undefined : dueIn > 1 ? `in ${dueIn} days` : dueIn === 1 ? "tomorrow" : dueIn === 0 ? "today" : `${-dueIn} days ago`,
+          statement_balance: s.balance === null ? undefined : $(s.balance),
+          minimum_payment: s.minimum === null ? undefined : $(s.minimum),
+          paid_since_statement: $(s.paidSince),
+          statement_balance_left: s.balance === null ? undefined : $(Math.max(0, s.balance - s.paidSince)),
+        }
+      : "not imported yet",
+    next_statement_closes: c.nextClose ?? undefined,
+    next_payment_due_estimate: c.nextDueEstimate ? `${c.nextDueEstimate} (estimate: about 3 weeks after it closes; exact once that statement is imported)` : undefined,
+  };
+}
 
 export function registerTools(server: McpServer) {
   registerChangeTools(server);
@@ -130,10 +158,13 @@ export function registerTools(server: McpServer) {
     },
     async () => {
       try {
-        const [c, rec] = await Promise.all([getCheckup(), getRecurringCharges()]);
+        const [c, rec, cards] = await Promise.all([getCheckup(), getRecurringCharges(), getCardPayments()]);
         const recent = (d: string) => Date.parse(c.today) - Date.parse(d) <= 45 * 86_400_000;
         return text({
           today: c.today,
+          card_payments_due_soon: cards.cards
+            .filter((k) => k.statement?.due && daysTo(c.today, k.statement.due) >= 0 && daysTo(c.today, k.statement.due) <= 10)
+            .map((k) => cardFacts(k, c.today)),
           subscription_price_changes: rec.items
             .filter((r) => r.active && r.priceChange && recent(r.priceChange.on))
             .map((r) => ({ name: r.merchant, from: $(r.priceChange!.fromCents), to: $(r.priceChange!.toCents), on: r.priceChange!.on, account: r.account })),
@@ -151,6 +182,25 @@ export function registerTools(server: McpServer) {
             note: u.note ?? undefined,
           })),
         });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_card_payments",
+    {
+      title: "Credit card payments",
+      description:
+        "Each credit card: the last statement's payment due date, statement balance and minimum payment (as printed on the statement), what's been paid onto the card since it closed, what's owed now, and when the next statement closes with an estimated due date. Facts only.",
+      inputSchema: z.object({}),
+      annotations: READ,
+    },
+    async () => {
+      try {
+        const p = await getCardPayments();
+        return text({ today: p.today, cards: p.cards.map((c) => cardFacts(c, p.today)) });
       } catch (e) {
         return fail(e);
       }

@@ -1185,6 +1185,7 @@ export async function previewStatement(bytes: Uint8Array, fileName: string) {
     source: parsed.source,
     account: { id: account.id, name: account.name },
     periodEnd: parsed.periodEnd,
+    payment: parsed.payment,
     checks: parsed.checks,
     rows,
   };
@@ -1197,10 +1198,38 @@ export type ImportCommit = {
   rows: { date: ISODate; posted: ISODate | null; amount_cents: number; description: string; fingerprint: string; categoryId: string | null }[];
   /** The statement's closing date (for the statement checklist). */
   periodEnd?: ISODate | null;
+  /** A card statement's payment box: due date, statement balance, minimum (cents). */
+  payment?: { dueDate: ISODate; balanceCents: number | null; minimumCents: number | null } | null;
   /** Statement rows that are entries you'd already added ("same purchase"). */
   links?: { existingIds: string[]; posted: ISODate | null; amount_cents: number; description: string; fingerprint: string }[];
   skipped: number;
 };
+
+const isoDate = (s: unknown): s is ISODate => typeof s === "string" && /^\d{4}-\d{2}-\d{2}$/.test(s);
+const centsOrNull = (n: unknown) => (typeof n === "number" && Number.isInteger(n) && Math.abs(n) < 1e10 ? n : null);
+
+/** A card statement's closing date, due date, balance and minimum (#7), kept for Claude. */
+async function saveCardStatement(db: Db, accountId: string, input: ImportCommit, importId: string) {
+  if (!isoDate(input.periodEnd) || !input.payment || !isoDate(input.payment.dueDate)) return;
+  const acct = okMaybe(await db.from("accounts").select("account_group").eq("id", accountId).maybeSingle());
+  if (acct?.account_group !== "debt_card") return;
+  ok(
+    await db
+      .from("card_statements")
+      .upsert(
+        {
+          account_id: accountId,
+          closing_date: input.periodEnd,
+          due_date: input.payment.dueDate,
+          balance_cents: centsOrNull(input.payment.balanceCents),
+          minimum_cents: centsOrNull(input.payment.minimumCents),
+          import_id: importId,
+        },
+        { onConflict: "account_id,closing_date" },
+      )
+      .select("id"),
+  );
+}
 
 /**
  * "Same purchase": your hand-entered entry takes the statement's details. It
@@ -1305,6 +1334,7 @@ export async function commitStatementImport(input: ImportCommit) {
         .select("id"),
     );
   }
+  await saveCardStatement(db, account.id, input, imp.id);
   const { linked, kept } = await linkToStatement(db, account.id, input.links ?? []);
   return { imported: fresh.length, importId: imp.id, linked, kept };
 }
@@ -2196,13 +2226,18 @@ async function statementChecklist(db: Db, today: ISODate) {
   const { statementStatus } = await import("./statements-due");
   const accts = ok(await db.from("accounts").select("id,key,name").in("key", STATEMENT_ACCOUNTS).eq("archived", false).order("sort_order"));
   const ids = accts.map((a) => a.id);
-  const [imps, snaps] = await Promise.all([
+  const [imps, snaps, cards] = await Promise.all([
     db.from("imports").select("account_id,period_end").eq("status", "committed").in("account_id", ids).not("period_end", "is", null).then(ok),
     // Statements loaded when the app was set up left a balance anchor on their closing date.
     db.from("balance_snapshots").select("account_id,as_of").eq("kind", "opening").in("account_id", ids).then(ok),
+    db.from("card_statements").select("account_id,closing_date").in("account_id", ids).then(ok),
   ]);
   return accts.map((a) => {
-    const ends = [...imps.filter((i) => i.account_id === a.id).map((i) => i.period_end!), ...snaps.filter((s) => s.account_id === a.id).map((s) => s.as_of)];
+    const ends = [
+      ...imps.filter((i) => i.account_id === a.id).map((i) => i.period_end!),
+      ...snaps.filter((s) => s.account_id === a.id).map((s) => s.as_of),
+      ...cards.filter((c) => c.account_id === a.id).map((c) => c.closing_date),
+    ];
     const last = ends.length ? ends.sort().at(-1)! : null;
     return { account: a.name, ...statementStatus(last as ISODate | null, today) };
   });
@@ -2301,4 +2336,53 @@ export async function getRecurringCharges() {
     today,
   );
   return { today, items };
+}
+
+// ───────────────────────────── card due dates for Claude (#7, owner, Nov 11 2026) ─────────────────────────────
+
+/** Days from a statement closing to its payment due date, when the statement isn't in yet (yours run 21–23). */
+const DUE_AFTER_CLOSE = 21;
+
+/**
+ * Each credit card: the latest statement's due date, statement balance and
+ * minimum, what's been paid onto the card since it closed, what's owed now,
+ * and when the next statement closes. Facts only, no suggestions.
+ */
+export async function getCardPayments() {
+  const { db, today } = await authed();
+  const [cards, bal, checklist] = await Promise.all([
+    db.from("accounts").select("id,name,key").eq("account_group", "debt_card").eq("archived", false).order("sort_order").then(ok),
+    balances(db),
+    statementChecklist(db, today),
+  ]);
+  const ids = cards.map((c) => c.id);
+  const [stmts, paid] = await Promise.all([
+    db.from("card_statements").select("account_id,closing_date,due_date,balance_cents,minimum_cents").in("account_id", ids).order("closing_date", { ascending: false }).then(ok),
+    // Payments onto the cards in the last few months (transfers in).
+    db.from("transactions").select("account_id,date,amount_cents").in("account_id", ids).gt("amount_cents", 0).eq("is_transfer", true).gte("date", addDays(today, -120)).then(ok),
+  ]);
+  return {
+    today,
+    cards: cards.map((c) => {
+      const last = stmts.find((s) => s.account_id === c.id) ?? null;
+      const next = checklist.find((x) => x.account === c.name);
+      const paidSince = last ? paid.filter((p) => p.account_id === c.id && p.date > last.closing_date).reduce((t, p) => t + Number(p.amount_cents), 0) : null;
+      const owed = -(bal.find((b) => b.account_id === c.id)?.balance_cents ?? 0);
+      return {
+        name: c.name,
+        owedNow: owed,
+        statement: last
+          ? {
+              closed: last.closing_date as ISODate,
+              due: (last.due_date as ISODate | null) ?? null,
+              balance: last.balance_cents != null ? Number(last.balance_cents) : null,
+              minimum: last.minimum_cents != null ? Number(last.minimum_cents) : null,
+              paidSince: paidSince ?? 0,
+            }
+          : null,
+        nextClose: next?.nextEnd ?? null,
+        nextDueEstimate: next?.nextEnd ? addDays(next.nextEnd, DUE_AFTER_CLOSE) : null,
+      };
+    }),
+  };
 }

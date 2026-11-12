@@ -302,6 +302,64 @@ export type Database = {
           },
         ]
       }
+      card_statements: {
+        Row: {
+          account_id: string
+          balance_cents: number | null
+          closing_date: string
+          created_at: string
+          due_date: string | null
+          id: string
+          import_id: string | null
+          minimum_cents: number | null
+          user_id: string
+        }
+        Insert: {
+          account_id: string
+          balance_cents?: number | null
+          closing_date: string
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          import_id?: string | null
+          minimum_cents?: number | null
+          user_id?: string
+        }
+        Update: {
+          account_id?: string
+          balance_cents?: number | null
+          closing_date?: string
+          created_at?: string
+          due_date?: string | null
+          id?: string
+          import_id?: string | null
+          minimum_cents?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "card_statements_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "account_balances"
+            referencedColumns: ["account_id"]
+          },
+          {
+            foreignKeyName: "card_statements_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "card_statements_import_id_fkey"
+            columns: ["import_id"]
+            isOneToOne: false
+            referencedRelation: "imports"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       categories: {
         Row: {
           archived: boolean
