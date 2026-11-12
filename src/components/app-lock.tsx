@@ -4,8 +4,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Droplet } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
+import { forgetDevice } from "@/lib/forget-device";
 import { appLockEnabled, unlockApp } from "@/app/actions/emergency";
 import { PinPad } from "@/components/pin-pad";
+import { checkLocalPin, forgetLocalPin, rememberPin } from "@/lib/local-pin";
 import { setLockCovered } from "@/lib/app-lock-state";
 
 const IDLE_MS = 10 * 60_000;
@@ -152,7 +154,20 @@ export function AppLock() {
                 }
                 check={async (pin) => {
                   const res = await unlockApp(pin).catch(() => null);
-                  if (!res) return "Can't check your PIN offline. Try again when you're connected.";
+                  if (!res) {
+                    // No connection: check against the PIN remembered on this phone.
+                    const local = await checkLocalPin(pin);
+                    if (local === "ok") {
+                      writeLast(Date.now());
+                      setState("open");
+                      return null;
+                    }
+                    if (local === "wrong") return "Wrong PIN.";
+                    if (local === "too-many") return "Too many tries offline. Connect to the internet to unlock.";
+                    return "Can't check your PIN offline yet. Unlock once while connected.";
+                  }
+                  if (res.ok) void rememberPin(pin);
+                  if (res.noPin) forgetLocalPin();
                   if (res.ok || res.noPin) {
                     writeLast(Date.now());
                     setState("open");
@@ -161,7 +176,7 @@ export function AppLock() {
                   return res.error;
                 }}
               />
-              <form action={signOut} className="mt-2">
+              <form action={signOut} onSubmit={forgetDevice} className="mt-2">
                 <button type="submit" className="px-3 py-2 text-xs text-muted-foreground hover:text-foreground">
                   Forgot PIN? Sign out
                 </button>

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Droplet, LogOut, Plus } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
+import { forgetDevice } from "@/lib/forget-device";
 import { cn } from "@/lib/utils";
 import { isActive, sidebarSections } from "@/lib/nav";
 import { QuickAddSheet } from "./quick-add-sheet";
@@ -77,7 +78,7 @@ function SidebarView({ pathname }: { pathname: string | null }) {
         ))}
       </nav>
 
-      <form action={signOut} className="pt-3">
+      <form action={signOut} onSubmit={forgetDevice} className="pt-3">
         <button
           type="submit"
           className="flex h-9 w-full items-center gap-3 rounded-lg px-3 text-sm text-muted-foreground transition-colors duration-(--duration-fast) hover:bg-sidebar-accent/60 hover:text-foreground"

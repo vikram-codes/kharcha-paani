@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { changePin } from "@/app/actions/emergency";
+import { rememberPin } from "@/lib/local-pin";
 
 const field =
   "num h-11 w-full rounded-xl bg-surface-2 px-3 text-base tracking-[0.3em] ring-1 ring-border outline-none placeholder:tracking-normal placeholder:text-muted-foreground/70 focus:ring-2 focus:ring-lime";
@@ -23,6 +24,8 @@ export function ChangePinForm() {
     startSaving(async () => {
       const res = await changePin(current, next);
       if (!res.ok) return setError(res.error);
+      // The offline unlock follows the new PIN.
+      await rememberPin(next);
       setError(null);
       setCurrent("");
       setNext("");
