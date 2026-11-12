@@ -2,6 +2,7 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
+import { adminClient } from "@/lib/supabase/admin";
 import { supabasePublishableKey, supabaseUrl } from "@/lib/supabase/env";
 
 /**
@@ -12,11 +13,7 @@ import { supabasePublishableKey, supabaseUrl } from "@/lib/supabase/env";
 export const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 export const newToken = () => randomBytes(32).toString("base64url");
 
-function admin() {
-  const secret = process.env.SUPABASE_SECRET_KEY;
-  if (!secret) throw new Error("SUPABASE_SECRET_KEY is not set");
-  return createClient<Database>(supabaseUrl, secret, { auth: { persistSession: false, autoRefreshToken: false } });
-}
+const admin = adminClient;
 
 type Session = { userId: string; accessToken: string; expiresAt: number };
 const sessions = new Map<string, Session>(); // per warm server instance

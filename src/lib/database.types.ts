@@ -530,6 +530,8 @@ export type Database = {
           display_name: string | null
           emergency_pin_hash: string | null
           last_account_id: string | null
+          last_backup_emailed_at: string | null
+          last_export_at: string | null
           monthly_budget_cents: number | null
           pin_failed_count: number
           pin_locked_until: string | null
@@ -540,6 +542,8 @@ export type Database = {
           display_name?: string | null
           emergency_pin_hash?: string | null
           last_account_id?: string | null
+          last_backup_emailed_at?: string | null
+          last_export_at?: string | null
           monthly_budget_cents?: number | null
           pin_failed_count?: number
           pin_locked_until?: string | null
@@ -550,6 +554,8 @@ export type Database = {
           display_name?: string | null
           emergency_pin_hash?: string | null
           last_account_id?: string | null
+          last_backup_emailed_at?: string | null
+          last_export_at?: string | null
           monthly_budget_cents?: number | null
           pin_failed_count?: number
           pin_locked_until?: string | null

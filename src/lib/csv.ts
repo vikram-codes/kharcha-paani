@@ -50,3 +50,18 @@ export function parseCsvObjects(text: string): Record<string, string>[] {
   if (!header) return [];
   return body.map((cells) => Object.fromEntries(header.map((h, i) => [h.trim(), cells[i] ?? ""])));
 }
+
+/**
+ * Rows → RFC 4180 CSV (CRLF, quoted where needed), readable by Numbers, Excel
+ * and Google Sheets. Text starting with = + or @ gets a leading ' so a
+ * spreadsheet shows it instead of running it as a formula.
+ */
+export function toCsv(rows: readonly (readonly (string | number | null | undefined)[])[]): string {
+  const cell = (v: string | number | null | undefined) => {
+    if (v === null || v === undefined) return "";
+    let s = String(v);
+    if (typeof v === "string" && /^[=+@]/.test(s)) s = `'${s}`;
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return rows.map((r) => r.map(cell).join(",")).join("\r\n") + "\r\n";
+}

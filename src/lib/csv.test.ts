@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseCsv, parseCsvObjects } from "./csv";
+import { parseCsv, parseCsvObjects, toCsv } from "./csv";
 
 describe("parseCsv", () => {
   it("splits simple rows", () => {
@@ -26,5 +26,16 @@ describe("parseCsvObjects", () => {
     expect(parseCsvObjects("date,amount,note\n2026-01-01,-35.0\n")).toEqual([
       { date: "2026-01-01", amount: "-35.0", note: "" },
     ]);
+  });
+});
+
+describe("toCsv", () => {
+  it("round-trips commas, quotes, newlines and empty cells", () => {
+    const rows = [["date", "description", "amount"], ["2026-11-10", 'Remitly, "India"\nEMI', -550], ["2026-11-11", null, 0]];
+    expect(parseCsv(toCsv(rows))).toEqual([["date", "description", "amount"], ["2026-11-10", 'Remitly, "India"\nEMI', "-550"], ["2026-11-11", "", "0"]]);
+  });
+
+  it("keeps formulas from running, but not negative amounts", () => {
+    expect(toCsv([["=HYPERLINK(1)", "-12.50", -3]])).toBe("'=HYPERLINK(1),-12.50,-3\r\n");
   });
 });
