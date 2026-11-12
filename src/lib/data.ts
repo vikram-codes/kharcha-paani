@@ -2096,7 +2096,7 @@ export async function listAccountsForChanges() {
 
 /**
  * Each account's balance as the app shows it (the student loan with its EMIs
- * taken off), for the backup. `db` may be the service-role client (weekly
+ * taken off), for the backup. `db` may be the service-role client (monthly
  * email), so everything is filtered by user_id.
  */
 export async function appBalances(db: Db, userId: string, today: ISODate): Promise<Map<string, number>> {
@@ -2118,7 +2118,37 @@ export async function appBalances(db: Db, userId: string, today: ISODate): Promi
   return out;
 }
 
-/** When the last weekly email went out / you last exported, and whether the email is set up. */
+/**
+ * Emails a full backup to the owner (runs as them; the monthly job uses
+ * runAsUser). "monthly": on the 1st, titled and summarised for the month that
+ * just ended; sent once per month. "now": from Settings, with this month so far.
+ */
+export async function sendBackupEmail(kind: "monthly" | "now") {
+  const { db, today } = await authed();
+  const { data: claims } = await db.auth.getClaims();
+  const userId = claims?.claims?.sub;
+  const to = claims?.claims?.email;
+  if (!userId || typeof to !== "string" || !to) throw new Error("No email address on your account.");
+  const month = kind === "monthly" ? monthKey(addDays(today, -1)) : monthKey(today);
+  const logKey = `backup:${month}`;
+  if (kind === "monthly" && okMaybe(await db.from("notification_log").select("key").eq("key", logKey).maybeSingle())) return { to, skipped: true };
+
+  const [{ buildBackup }, { emailBackup }, { formatMonth, formatMonthName, formatDay }] = await Promise.all([import("./backup"), import("./backup-email"), import("./dates")]);
+  const [file, m] = await Promise.all([buildBackup(db, userId, today, await appBalances(db, userId, today)), monthSummaryData(month)]);
+  const transactions = Object.values(m.transactions).reduce((t, rows) => t + rows.length, 0);
+  await emailBackup(to, kind === "monthly" ? formatMonth(month) : `${formatDay(today)}, ${today.slice(0, 4)}`, file, {
+    label: kind === "monthly" ? formatMonth(month) : `${formatMonthName(month)} so far`,
+    spent: m.summary.spent,
+    budget: m.budget.total,
+    income: m.summary.income,
+    transactions,
+  });
+  ok(await db.from("profiles").update({ last_backup_emailed_at: new Date().toISOString() }).eq("user_id", userId).select("user_id"));
+  if (kind === "monthly") await db.from("notification_log").upsert({ key: logKey }, { onConflict: "user_id,key", ignoreDuplicates: true });
+  return { to, skipped: false };
+}
+
+/** When the last monthly email went out / you last exported, and whether the email is set up. */
 export async function getBackupStatus() {
   const { db } = await session();
   const { backupEmailConfigured } = await import("./backup-email");
@@ -2126,7 +2156,7 @@ export async function getBackupStatus() {
   return {
     emailedAt: p?.last_backup_emailed_at ?? null,
     exportedAt: p?.last_export_at ?? null,
-    /** The weekly job can run: Resend key + cron secret are set. */
+    /** The monthly email can run: Resend key + cron secret are set. */
     emailReady: backupEmailConfigured() && !!process.env.CRON_SECRET,
     /** "Email it now" works: the Resend key is set. */
     emailConfigured: backupEmailConfigured(),
@@ -2149,12 +2179,8 @@ export async function ownerBackup(pin: string, how: "download" | "email") {
   const { buildBackup } = await import("./backup");
   const file = await buildBackup(db, userId, today, await appBalances(db, userId, today));
   if (how === "email") {
-    const { emailBackup } = await import("./backup-email");
-    const email = claims.claims.email;
-    if (typeof email !== "string" || !email) throw new Error("No email address on your account.");
-    await emailBackup(email, today, file);
-    ok(await db.from("profiles").update({ last_backup_emailed_at: new Date().toISOString() }).eq("user_id", userId).select("user_id"));
-    return { ok: true as const, emailedTo: email };
+    const sent = await sendBackupEmail("now");
+    return { ok: true as const, emailedTo: sent.to };
   }
   ok(await db.from("profiles").update({ last_export_at: new Date().toISOString() }).eq("user_id", userId).select("user_id"));
   return { ok: true as const, fileName: file.fileName, zip: file.zip };

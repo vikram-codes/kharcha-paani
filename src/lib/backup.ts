@@ -18,7 +18,7 @@ type Table = keyof Database["public"]["Tables"];
  * Left out: the PIN's hash and lockout counters, Claude connector tokens and
  * Claude's drafts (secrets, or throwaway).
  * Every query filters by user_id, so this is safe with the service-role client
- * (weekly email) as well as a signed-in one (Settings export).
+ * (monthly email job) as well as a signed-in one (Settings).
  */
 const TABLES: { table: Table; columns?: string; order?: string }[] = [
   { table: "profiles", columns: "user_id,display_name,last_account_id,monthly_budget_cents,updated_at", order: "user_id" },

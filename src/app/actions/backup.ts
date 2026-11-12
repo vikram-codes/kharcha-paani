@@ -16,7 +16,7 @@ export async function downloadBackup(pin: string): Promise<{ ok: true; fileName:
   }
 }
 
-/** Emails the backup now (also tests that the weekly email works). */
+/** Emails the backup now (also tests that the monthly email works). */
 export async function emailBackupNow(pin: string): Promise<{ ok: true; emailedTo: string } | Fail> {
   try {
     const r = await ownerBackup(String(pin ?? ""), "email");
