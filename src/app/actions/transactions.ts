@@ -17,7 +17,7 @@ export async function addTransaction(input: NewTransaction): Promise<{ ok: true;
     if (input.kind === "expense") checkBudget();
     // Every screen's totals change: refresh them (incl. the privately cached summaries).
     revalidatePath("/", "layout");
-    return { ok: true, message: `${saved.category} · ${saved.account}` };
+    return { ok: true, message: `${saved.category} · ${saved.account}${"mergedApplePay" in saved ? " · matched your Apple Pay entry" : ""}` };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "Couldn't save. Try again." };
   }

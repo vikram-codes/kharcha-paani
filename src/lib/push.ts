@@ -12,11 +12,12 @@ type Db = SupabaseClient<Database>;
 
 export const pushConfigured = () => !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT);
 
-const PREF: Record<Exclude<ReminderKind, "test">, "notify_bills" | "notify_payday" | "notify_budget" | "notify_catchup"> = {
+const PREF: Record<Exclude<ReminderKind, "test">, "notify_bills" | "notify_payday" | "notify_budget" | "notify_catchup" | "notify_applepay"> = {
   bills: "notify_bills",
   payday: "notify_payday",
   budget: "notify_budget",
   catchup: "notify_catchup",
+  applepay: "notify_applepay",
 };
 
 /**
@@ -29,7 +30,7 @@ export async function deliver(db: Db, reminders: Reminder[]): Promise<number> {
   webpush.setVapidDetails(process.env.VAPID_SUBJECT!, process.env.VAPID_PUBLIC_KEY!, process.env.VAPID_PRIVATE_KEY!);
 
   const [{ data: prefs }, { data: subs }, { data: logged }] = await Promise.all([
-    db.from("profiles").select("notify_bills,notify_payday,notify_budget,notify_catchup").maybeSingle(),
+    db.from("profiles").select("notify_bills,notify_payday,notify_budget,notify_catchup,notify_applepay").maybeSingle(),
     db.from("push_subscriptions").select("id,endpoint,p256dh,auth"),
     db.from("notification_log").select("key").in("key", reminders.flatMap((r) => r.keys).slice(0, 500)),
   ]);

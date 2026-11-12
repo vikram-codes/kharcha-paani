@@ -35,7 +35,7 @@ export const INSTRUCTIONS = `Kharcha-Paani is the owner's personal finance app (
 Money model: Cash = bank accounts (the emergency fund is private and never shown here). Debts = credit cards + Affirm; the student loan (India, 9.5%) is separate. Card purchases count as spending when made and raise that card's debt; card payments are transfers, not spending.
 Budget: a monthly headline budget plus fixed and variable lines. "Spent" excludes transfers, friend paybacks and balance adjustments.
 Writing (full access: add, edit, move, delete, split, balances, owed money, bills, budget, rules, goals, investments): NEVER save without the owner's explicit yes. Always call the matching draft_* tool first (draft_transactions for new purchases/income, draft_transfer for card payments, draft_edit_transaction / draft_delete_transactions with ids from list_transactions, etc.), show the preview lines to the owner, and call confirm_draft only after they clearly agree in this conversation. If the draft reports problems (unclear category/account), ask the owner instead of guessing.
-Weekly check-in: the owner gets a Sunday 3 pm reminder to catch up and then talks to you. When they check in, or ask what needs attention, call get_checkup first. Tell them which statements are ready to import (by account, and how many if more than one is missed), and list any uncategorized transactions, suggesting a category for each from list_categories_and_accounts; file them only with draft_edit_transaction and their yes. Also mention card payments due in the next 10 days it lists (as facts) and any subscription price changes. If nothing needs attention, say so in one line.
+Weekly check-in: the owner gets a Sunday 3 pm reminder to catch up and then talks to you. When they check in, or ask what needs attention, call get_checkup first. Tell them which statements are ready to import (by account, and how many if more than one is missed), and list any uncategorized transactions, suggesting a category for each from list_categories_and_accounts; file them only with draft_edit_transaction and their yes. Also give a short look-back at what Apple Pay added automatically in the last 7 days (count, total, anything filed oddly), mention card payments due in the next 10 days it lists (as facts) and any subscription price changes. If nothing needs attention, say so in one line.
 Credit card payments: use get_card_payments (due date, statement balance, minimum, paid since the statement, owed now). Report these as facts only. Never suggest how much to pay, paying cards down or any payoff plan; the owner tracks card interest as a cost and decides payments themselves.
 Subscriptions and recurring charges: use get_subscriptions (monthly and yearly totals, by group, with price changes and ones that stopped).
 Amounts in tool results are dollars. Expenses are negative in transaction lists.`;
@@ -173,6 +173,11 @@ export function registerTools(server: McpServer) {
             last_statement_imported: s.lastEnd ?? "never",
             status: s.behind === 0 ? `up to date (next closes ${s.nextEnd ?? "unknown"})` : `${s.behind} statement${s.behind === 1 ? "" : "s"} ready to import since ${s.readySince}`,
           })),
+          apple_pay_last_7_days: {
+            count: c.applePay.length,
+            total: $(-c.applePay.reduce((t, a) => t + a.amount_cents, 0)),
+            purchases: c.applePay.map((a) => ({ id: a.id, date: a.date, merchant: a.merchant, amount: $(a.amount_cents), category: a.category ?? "Uncategorized", account: a.account })),
+          },
           uncategorized: c.uncategorized.map((u) => ({
             id: u.id,
             date: u.date,
@@ -281,6 +286,7 @@ export function registerTools(server: McpServer) {
             category: r.splits.length ? `Split: ${r.splits.map((s) => `${s.name} ${$(s.amount_cents)}`).join(" + ")}` : (r.category?.name ?? "Uncategorized"),
             account: r.account,
             transfer: r.isTransfer || undefined,
+            via: r.source === "applepay" ? "Apple Pay (automatic)" : r.source === "mcp" ? "Claude" : undefined,
             note: r.note ?? undefined,
             friend_owes: r.owed.length ? r.owed.map((o) => `${o.person} ${$(o.amount_cents)}${o.settled ? " (received)" : ""}`).join(", ") : undefined,
           }))

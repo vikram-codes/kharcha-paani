@@ -686,6 +686,32 @@ export async function createManualTransaction(input: NewTransaction) {
   if (!account) throw new Error("Choose where it was paid from.");
   if (!category || category.kind !== input.kind) throw new Error("Choose a category.");
   const amount = input.kind === "expense" ? -input.amountCents : input.amountCents;
+  // Apple Pay already sent this purchase (same card and amount, within a day): fill that one in instead of doubling it.
+  if (input.kind === "expense") {
+    const ap = okMaybe(
+      await db
+        .from("transactions")
+        .select("id")
+        .eq("source", "applepay")
+        .eq("account_id", account.id)
+        .eq("amount_cents", amount)
+        .gte("date", addDays(input.date, -1))
+        .lte("date", addDays(input.date, 1))
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+    );
+    if (ap) {
+      ok(
+        await db
+          .from("transactions")
+          .update({ category_id: category.id, is_transfer: false, needs_review: false, ...(note ? { note } : {}), pays_account_id: pays?.id ?? null })
+          .eq("id", ap.id)
+          .select("id"),
+      );
+      return { account: account.name, category: category.name, amountCents: amount, mergedApplePay: true };
+    }
+  }
   const clientId = validClientId(input.clientId);
   const saved = await db
     .from("transactions")
@@ -1171,7 +1197,7 @@ export async function previewStatement(bytes: Uint8Array, fileName: string) {
             date: hits[0].date as ISODate,
             amount_cents: hits.reduce((t, h) => t + Number(h.amount_cents), 0),
             label: hits.map((h) => h.note || cleanMerchant(h.description)).join(" + "),
-            linkable: hits.every((h) => !h.fingerprint && (h.source === "manual" || h.source === "mcp")),
+            linkable: hits.every((h) => !h.fingerprint && ["manual", "mcp", "applepay"].includes(h.source)),
             confident: m.confident !== false,
           }
         : null,
@@ -1251,7 +1277,7 @@ async function linkToStatement(db: Db, accountId: string, links: NonNullable<Imp
   for (const l of links) {
     const mine = l.existingIds.map((id) => byId.get(id));
     // Only your own unlinked entries on this account.
-    if (!mine.length || mine.some((m) => !m || m.account_id !== accountId || m.fingerprint || !["manual", "mcp"].includes(m.source))) continue;
+    if (!mine.length || mine.some((m) => !m || m.account_id !== accountId || m.fingerprint || !["manual", "mcp", "applepay"].includes(m.source))) continue;
     if (!/^\d{4}-\d{2}-\d{2}$/.test(l.posted ?? "") && l.posted !== null) continue;
     if (typeof l.fingerprint !== "string" || !l.fingerprint || l.fingerprint.length > 400) continue;
     const [first] = mine as NonNullable<(typeof mine)[number]>[];
@@ -1843,18 +1869,18 @@ export async function createConnectorToken(name: string) {
   const { db } = await authed();
   const { newToken, hashToken } = await import("./mcp/auth");
   const token = newToken();
-  ok(await db.from("api_tokens").insert({ name: name.trim().slice(0, 40) || "Claude", token_hash: hashToken(token) }).select("id"));
+  ok(await db.from("api_tokens").insert({ name: name.trim().slice(0, 40) || "Claude", scope: "mcp", token_hash: hashToken(token) }).select("id"));
   return token;
 }
 
 export async function listConnectorTokens() {
   const { db } = await authed();
-  return ok(await db.from("api_tokens").select("id,name,created_at,last_used_at,revoked_at").order("created_at", { ascending: false }));
+  return ok(await db.from("api_tokens").select("id,name,created_at,last_used_at,revoked_at").eq("scope", "mcp").order("created_at", { ascending: false }));
 }
 
 export async function revokeConnectorToken(id: string) {
   const { db } = await authed();
-  ok(await db.from("api_tokens").update({ revoked_at: new Date().toISOString() }).eq("id", id).select("id"));
+  ok(await db.from("api_tokens").update({ revoked_at: new Date().toISOString() }).eq("id", id).eq("scope", "mcp").select("id"));
   const { forgetSessions } = await import("./mcp/auth");
   forgetSessions();
 }
@@ -2176,22 +2202,28 @@ export async function getNotificationSettings() {
   const { db } = await session();
   const { pushConfigured } = await import("./push");
   const [p, subs] = await Promise.all([
-    db.from("profiles").select("notify_bills,notify_payday,notify_budget,notify_catchup").maybeSingle().then(okMaybe),
+    db.from("profiles").select("notify_bills,notify_payday,notify_budget,notify_catchup,notify_applepay").maybeSingle().then(okMaybe),
     db.from("push_subscriptions").select("endpoint,device").then(ok),
   ]);
   return {
     configured: pushConfigured(),
     publicKey: process.env.VAPID_PUBLIC_KEY ?? null,
-    prefs: { bills: p?.notify_bills ?? true, payday: p?.notify_payday ?? true, budget: p?.notify_budget ?? true, catchup: p?.notify_catchup ?? true },
+    prefs: {
+      bills: p?.notify_bills ?? true,
+      payday: p?.notify_payday ?? true,
+      budget: p?.notify_budget ?? true,
+      catchup: p?.notify_catchup ?? true,
+      applepay: p?.notify_applepay ?? true,
+    },
     endpoints: subs.map((s) => s.endpoint),
   };
 }
 
-export type NotifyKind = "bills" | "payday" | "budget" | "catchup";
+export type NotifyKind = "bills" | "payday" | "budget" | "catchup" | "applepay";
 
 export async function setNotificationPref(kind: NotifyKind, on: boolean) {
   const { db } = await authed();
-  const col = ({ bills: "notify_bills", payday: "notify_payday", budget: "notify_budget", catchup: "notify_catchup" } as const)[kind];
+  const col = ({ bills: "notify_bills", payday: "notify_payday", budget: "notify_budget", catchup: "notify_catchup", applepay: "notify_applepay" } as const)[kind];
   if (!col) throw new Error("Unknown reminder.");
   const p = okMaybe(await db.from("profiles").select("user_id").maybeSingle());
   if (!p) throw new Error("Profile not found.");
@@ -2249,7 +2281,7 @@ async function statementChecklist(db: Db, today: ISODate) {
  */
 export async function getCheckup() {
   const { db, today } = await authed();
-  const [statements, rows] = await Promise.all([
+  const [statements, rows, applePay] = await Promise.all([
     statementChecklist(db, today),
     db
       .from("transactions")
@@ -2257,6 +2289,15 @@ export async function getCheckup() {
       .is("category_id", null)
       .eq("in_reports", true)
       .eq("is_transfer", false)
+      .order("date", { ascending: false })
+      .limit(200)
+      .then(ok),
+    // What Apple Pay added in the last 7 days (#9), for the weekly look-back.
+    db
+      .from("transactions")
+      .select("id,date,amount_cents,description,account:accounts!transactions_account_id_fkey(name),category:categories(name)")
+      .eq("source", "applepay")
+      .gte("date", addDays(today, -7))
       .order("date", { ascending: false })
       .limit(200)
       .then(ok),
@@ -2272,6 +2313,14 @@ export async function getCheckup() {
       description: r.description,
       note: r.note,
       account: r.account?.name ?? "",
+    })),
+    applePay: applePay.map((r) => ({
+      id: r.id,
+      date: r.date as ISODate,
+      amount_cents: Number(r.amount_cents),
+      merchant: r.description,
+      account: r.account?.name ?? "",
+      category: r.category?.name ?? null,
     })),
   };
 }
@@ -2385,4 +2434,123 @@ export async function getCardPayments() {
       };
     }),
   };
+}
+
+// ───────────────────────────── Apple Pay → app (#9, owner, Nov 11 2026) ─────────────────────────────
+
+/**
+ * A category for a merchant, the way imports choose one: your "always" rules,
+ * then how you filed that merchant before, then the built-in guesses.
+ */
+async function categoryForMerchant(db: Db, description: string, amountCents: number, today: ISODate) {
+  const [{ merchantKey }, { historyCategories }, { suggestCategory }] = await Promise.all([import("./recurring"), import("./import/dedupe"), import("./import/categorize")]);
+  const key = merchantKey(description);
+  for (const r of await userRules(db)) {
+    if (r.match_field === "merchant" && r.pattern === key) return { categoryId: r.category_id, from: "rule" as const };
+    if (r.match_field === "description" && description.toLowerCase().includes(r.pattern.toLowerCase())) return { categoryId: r.category_id, from: "rule" as const };
+  }
+  const past = await pastCategories(db, addDays(today, -540));
+  const usual = historyCategories(past.map((p) => ({ key: merchantKey(p.description), amount_cents: Number(p.amount_cents), categoryId: p.category_id! })))(key, amountCents);
+  if (usual) return { categoryId: usual, from: "history" as const };
+  const guess = suggestCategory(description, amountCents);
+  if (guess) {
+    const c = okMaybe(await db.from("categories").select("id").eq("key", guess).maybeSingle());
+    if (c) return { categoryId: c.id, from: "guess" as const };
+  }
+  return { categoryId: null, from: null };
+}
+
+/**
+ * Saves one Apple Pay purchase sent by the Shortcuts automation (runs as the
+ * owner via runAsUser). Straight in, no confirming: statements double-check it
+ * later. Skips it if you already added the same purchase yourself.
+ */
+export async function recordApplePay(input: { amountCents: number; merchant: string; card: string }) {
+  const { db, today } = await authed();
+  const { matchCard, addedNotice } = await import("./applepay");
+  const merchant = input.merchant.replace(/\s+/g, " ").trim().slice(0, 120) || "Apple Pay purchase";
+  const walletName = input.card.replace(/\s+/g, " ").trim().slice(0, 80) || "Apple Pay";
+  if (!Number.isInteger(input.amountCents) || input.amountCents <= 0 || input.amountCents > 100_000_000) throw new Error("Amount missing.");
+
+  // Which account: remembered for this Wallet card, else worked out from its name (and remembered).
+  const [mapped, accounts] = await Promise.all([
+    db.from("wallet_cards").select("account_id").eq("wallet_name", walletName).maybeSingle().then(okMaybe),
+    db.from("accounts").select("id,key,name,last4,account_group").in("account_group", ["cash_bank", "debt_card"]).eq("archived", false).then(ok),
+  ]);
+  const accountId = mapped?.account_id ?? matchCard(walletName, accounts);
+  const account = accounts.find((a) => a.id === accountId);
+  if (!account) throw new Error(`Unknown card "${walletName}". Pick its account in Settings → Apple Pay.`);
+  ok(await db.from("wallet_cards").upsert({ wallet_name: walletName, account_id: account.id, last_seen_at: new Date().toISOString() }, { onConflict: "user_id,wallet_name" }).select("wallet_name"));
+
+  const amount = -input.amountCents;
+  // Already added by hand (quick add or Claude) today or yesterday, or the automation fired twice: don't double it.
+  const recent = ok(
+    await db
+      .from("transactions")
+      .select("id,source,description,created_at")
+      .eq("account_id", account.id)
+      .eq("amount_cents", amount)
+      .gte("date", addDays(today, -1))
+      .in("source", ["manual", "mcp", "applepay"]),
+  );
+  const twin = recent.find(
+    (t) => t.source !== "applepay" || (t.description === merchant && Date.now() - Date.parse(t.created_at) < 3 * 60_000),
+  );
+  if (twin) return { id: twin.id, duplicate: true, account: account.name, category: null };
+
+  const { categoryId } = await categoryForMerchant(db, merchant, amount, today);
+  const cat = categoryId ? okMaybe(await db.from("categories").select("name,kind").eq("id", categoryId).maybeSingle()) : null;
+  const [saved] = ok(
+    await db
+      .from("transactions")
+      .insert({
+        account_id: account.id,
+        date: today,
+        amount_cents: amount,
+        description: merchant,
+        category_id: categoryId,
+        is_transfer: cat?.kind === "transfer",
+        source: "applepay",
+        needs_review: !categoryId,
+      })
+      .select("id"),
+  );
+
+  const { deliver } = await import("./push");
+  const n = addedNotice({ cents: input.amountCents, merchant, category: cat?.name ?? null, account: account.name });
+  await deliver(db, [{ kind: "applepay", keys: [`applepay:${saved.id}`], title: n.title, body: n.body, url: `/transactions?tx=${saved.id}` }]).catch(() => 0);
+  return { id: saved.id, duplicate: false, account: account.name, category: cat?.name ?? null };
+}
+
+/** Settings → Apple Pay: is a link set up, and which Wallet card goes to which account. */
+export async function getApplePaySettings() {
+  const { db } = await session();
+  const [links, cards, accounts] = await Promise.all([
+    db.from("api_tokens").select("id,created_at,last_used_at").eq("scope", "applepay").is("revoked_at", null).order("created_at", { ascending: false }).then(ok),
+    db.from("wallet_cards").select("wallet_name,account_id,last_seen_at").order("last_seen_at", { ascending: false }).then(ok),
+    db.from("accounts").select("id,name").in("account_group", ["cash_bank", "debt_card"]).eq("archived", false).order("sort_order").then(ok),
+  ]);
+  return { link: links[0] ?? null, cards, accounts };
+}
+
+/** A new Apple Pay link (the old one stops working). Returned once; only its hash is kept. */
+export async function createApplePayLink() {
+  const { db } = await authed();
+  const { newToken, hashToken } = await import("./mcp/auth");
+  ok(await db.from("api_tokens").update({ revoked_at: new Date().toISOString() }).eq("scope", "applepay").is("revoked_at", null).select("id"));
+  const token = newToken();
+  ok(await db.from("api_tokens").insert({ name: "Apple Pay", scope: "applepay", token_hash: hashToken(token) }).select("id"));
+  return token;
+}
+
+export async function revokeApplePayLink() {
+  const { db } = await authed();
+  ok(await db.from("api_tokens").update({ revoked_at: new Date().toISOString() }).eq("scope", "applepay").is("revoked_at", null).select("id"));
+}
+
+export async function setWalletCardAccount(walletName: string, accountId: string) {
+  const { db } = await authed();
+  const acct = okMaybe(await db.from("accounts").select("id").eq("id", accountId).in("account_group", ["cash_bank", "debt_card"]).maybeSingle());
+  if (!acct) throw new Error("Choose an account.");
+  ok(await db.from("wallet_cards").update({ account_id: acct.id }).eq("wallet_name", walletName).select("wallet_name"));
 }

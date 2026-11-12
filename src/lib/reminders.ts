@@ -4,7 +4,7 @@
  * PIN doesn't apply. Each reminder carries the log keys it covers, so it's
  * never sent twice (the morning job runs at two UTC hours for daylight time).
  */
-export type ReminderKind = "bills" | "payday" | "budget" | "catchup" | "test";
+export type ReminderKind = "bills" | "payday" | "budget" | "catchup" | "applepay" | "test";
 export type Reminder = {
   kind: ReminderKind;
   /** notification_log keys; empty = always send (a test). */

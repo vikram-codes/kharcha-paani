@@ -14,6 +14,8 @@ export async function proxy(request: NextRequest) {
   if (pathname.startsWith("/api/mcp/")) return NextResponse.next();
   // The weekly backup job authenticates with CRON_SECRET (src/app/api/cron).
   if (pathname.startsWith("/api/cron/")) return NextResponse.next();
+  // Apple Pay purchases from the Shortcuts automation carry their own link token (src/app/api/applepay).
+  if (pathname.startsWith("/api/applepay/")) return NextResponse.next();
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
   if (!isSupabaseConfigured) {
