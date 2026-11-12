@@ -1,6 +1,6 @@
 import { after } from "next/server";
 import { parseAmount } from "@/lib/applepay";
-import { recordApplePay, runAsUser, sendReminders } from "@/lib/data";
+import { notifyApplePayProblem, recordApplePay, runAsUser, sendReminders } from "@/lib/data";
 import { applePayOwner } from "@/lib/mcp/auth";
 import { sessionFor } from "@/lib/supabase/admin";
 
@@ -23,11 +23,16 @@ export async function POST(request: Request, ctx: RouteContext<"/api/applepay/[t
   } catch {
     return reply(400, "Send JSON with amount, merchant and card.");
   }
-  const amountCents = parseAmount(body.amount);
-  if (!amountCents) return reply(400, "The amount is missing or not a number.");
-
   const session = await sessionFor(userId);
   if (!session) return reply(500, "Couldn't sign in.");
+  // Anything unusable gets a notification showing what arrived (a Shortcut field set up wrong).
+  const problem = (message: string, status: number) => {
+    after(() => runAsUser(session.client as never, () => notifyApplePayProblem(message, body)).catch(() => 0));
+    return reply(status, message);
+  };
+
+  const amountCents = parseAmount(body.amount);
+  if (!amountCents) return problem("The amount is missing or not a number.", 400);
   try {
     const saved = await runAsUser(session.client as never, () =>
       recordApplePay({ amountCents, merchant: String(body.merchant ?? ""), card: String(body.card ?? "") }),
@@ -35,6 +40,6 @@ export async function POST(request: Request, ctx: RouteContext<"/api/applepay/[t
     if (!saved.duplicate) after(() => runAsUser(session.client as never, () => sendReminders("budget")).catch(() => 0));
     return reply(200, saved.duplicate ? "Already added." : `Added to ${saved.account}${saved.category ? ` · ${saved.category}` : ""}.`);
   } catch (e) {
-    return reply(422, e instanceof Error ? e.message : "Couldn't save it.");
+    return problem(e instanceof Error ? e.message : "Couldn't save it.", 422);
   }
 }

@@ -2554,3 +2554,27 @@ export async function setWalletCardAccount(walletName: string, accountId: string
   if (!acct) throw new Error("Choose an account.");
   ok(await db.from("wallet_cards").update({ account_id: acct.id }).eq("wallet_name", walletName).select("wallet_name"));
 }
+
+/**
+ * The Apple Pay link got something it couldn't save: tell the owner what
+ * arrived, so a Shortcut set up wrong is easy to spot (#9).
+ */
+export async function notifyApplePayProblem(problem: string, received: Record<string, unknown>) {
+  const { db } = await authed();
+  const { deliver } = await import("./push");
+  const show = (k: string) => {
+    const v = received[k];
+    const s = v === undefined ? "nothing" : typeof v === "string" ? `"${v}"` : JSON.stringify(v);
+    return `${k}: ${s.slice(0, 60)}`;
+  };
+  const extra = Object.keys(received).filter((k) => !["amount", "merchant", "card"].includes(k));
+  await deliver(db, [
+    {
+      kind: "applepay",
+      keys: [],
+      title: "Apple Pay sync couldn't add a purchase",
+      body: `${problem} Received ${["amount", "merchant", "card"].map(show).join(", ")}${extra.length ? `; also ${extra.slice(0, 3).join(", ")}` : ""}.`,
+      url: "/settings",
+    },
+  ]).catch(() => 0);
+}
