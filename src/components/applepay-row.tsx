@@ -17,14 +17,18 @@ export type ApplePaySettings = {
 
 const day = (ts: string) => formatShort(todayISO(new Date(ts)));
 
-/** The Shortcuts setup, step by step (iOS 17+; labels can differ a little between iOS versions). */
+/**
+ * The Shortcuts setup, step by step. Since iOS 26 the trigger is called
+ * "Wallet" (it was "Transaction" on iOS 17–18); labels can differ a little.
+ */
 const STEPS = [
-  "Open the Shortcuts app → Automation → + (new automation) → Transaction.",
+  "Open the Shortcuts app → Automation → + (new automation) → Wallet. (On iOS 17–18 it's called Transaction.)",
   "Cards: select all of them (Triangle, Costco CIBC, Scene+ Visa, Scotia debit). Leave Categories and Merchants on Any. Choose Run Immediately and turn off Notify When Run. Tap Next.",
   "Tap New Blank Automation, then add the action Get Contents of URL.",
   "Paste your link as the URL. Tap the arrow to show more: Method POST, Request Body JSON.",
-  "Add three Text fields: amount → Shortcut Input › Amount. merchant → Shortcut Input › Merchant. card → Shortcut Input › Card or Pass › Name.",
+  "Add three Text fields: amount → Shortcut Input › Amount. merchant → Shortcut Input › Merchant. card → Shortcut Input › Card (its name).",
   "Tap Done. Your next Apple Pay tap lands in the app, with a notification.",
+  "After an iOS update, check the automation is still on Run Immediately: updates can switch it back to Ask Before Running.",
 ];
 
 /**
