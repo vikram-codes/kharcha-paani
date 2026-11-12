@@ -24,7 +24,9 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { todayISO } from "@/lib/dates";
 import { formatCents, parseToCents } from "@/lib/money";
+import { enqueue, isNetworkError, newClientId } from "@/lib/outbox";
 import { cn } from "@/lib/utils";
 
 type Options = Awaited<ReturnType<typeof loadQuickAdd>>;
@@ -72,6 +74,28 @@ export type QuickAddPrefill = {
   date: string;
 };
 
+/**
+ * The last accounts/categories loaded, kept on the phone so quick add opens
+ * instantly, and works with no signal (owner, Nov 11 2026).
+ */
+const OPTIONS_KEY = "kp:qa-options";
+function cachedOptions(): Options | null {
+  try {
+    const raw = localStorage.getItem(OPTIONS_KEY);
+    // "today" is whatever today is now, not when they were saved.
+    return raw ? { ...(JSON.parse(raw) as Options), today: todayISO() } : null;
+  } catch {
+    return null;
+  }
+}
+function cacheOptions(o: Options) {
+  try {
+    localStorage.setItem(OPTIONS_KEY, JSON.stringify(o));
+  } catch {
+    /* storage blocked */
+  }
+}
+
 /** 55000 → "550", 27958 → "279.58" (what the keypad would have typed). */
 const centsToTyped = (c: number) =>
   c % 100 === 0 ? String(c / 100) : (c / 100).toFixed(2);
@@ -103,31 +127,44 @@ export function QuickAddSheet({
   const [loading, startLoading] = useTransition();
   const [saving, startSaving] = useTransition();
 
-  const load = () =>
+  const apply = (o: Options) => {
+    setOpts(o);
+    setAccountId((a) => a || o.lastAccountId || "");
+    // Transfers default to chequing → the last card used (or the first card).
+    setFromId(
+      (f) =>
+        f ||
+        o.transferFrom.find((a) => /chequing/i.test(a.name))?.id ||
+        o.transferFrom[0]?.id ||
+        "",
+    );
+    setToId(
+      (t) =>
+        t ||
+        (
+          o.transferTo.find((a) => a.id === o.lastAccountId && a.card) ??
+          o.transferTo.find((a) => a.card)
+        )?.id ||
+        "",
+    );
+    // A bill due tomorrow is entered today (no future dates).
+    setDate((d) => (d && d <= o.today ? d : o.today));
+  };
+
+  const load = () => {
+    const cached = cachedOptions();
+    if (cached) apply(cached);
     startLoading(async () => {
-      const o = await loadQuickAdd();
-      setOpts(o);
-      setAccountId((a) => a || o.lastAccountId || "");
-      // Transfers default to chequing → the last card used (or the first card).
-      setFromId(
-        (f) =>
-          f ||
-          o.transferFrom.find((a) => /chequing/i.test(a.name))?.id ||
-          o.transferFrom[0]?.id ||
-          "",
-      );
-      setToId(
-        (t) =>
-          t ||
-          (
-            o.transferTo.find((a) => a.id === o.lastAccountId && a.card) ??
-            o.transferTo.find((a) => a.card)
-          )?.id ||
-          "",
-      );
-      // A bill due tomorrow is entered today (no future dates).
-      setDate((d) => (d && d <= o.today ? d : o.today));
+      try {
+        const o = await loadQuickAdd();
+        cacheOptions(o);
+        apply(o);
+      } catch {
+        // Offline: the saved choices above are used.
+        if (!cached) toast.error("You're offline, and quick add hasn't been opened online on this phone yet.");
+      }
     });
+  };
 
   const onOpenChange = (next: boolean) => {
     setOpen(next);
@@ -170,11 +207,36 @@ export function QuickAddSheet({
     ? cents > 0 && !!fromId && !!toId && fromId !== toId && !saving
     : cents > 0 && !!categoryId && !!accountId && !saving;
 
+  const done = () => {
+    setAmount("");
+    setCategoryId(null);
+    setNote("");
+    setOpen(false);
+  };
+
   const save = useCallback(() => {
     if (!canSave) return;
+    const clientId = newClientId();
+    const offline = typeof navigator !== "undefined" && !navigator.onLine;
+    // No signal: keep it on the phone; it syncs when the connection is back.
+    const keep = (item: Parameters<typeof enqueue>[0]) => {
+      enqueue(item);
+      toast.success(`${formatCents(cents)} saved offline · syncs when you're back online`);
+      done();
+    };
+    const account = (id: string) => shortName(opts?.accounts.find((a) => a.id === id)?.name ?? opts?.transferTo.find((a) => a.id === id)?.name ?? "");
     if (isTransfer) {
+      const input = { fromId, toId, cents, date, note, clientId };
+      const item = { id: clientId, kind: "transfer" as const, input, cents: -cents, label: `${account(fromId) || "Transfer"} → ${account(toId)}` };
+      if (offline) return keep(item);
       startSaving(async () => {
-        const res = await addTransfer({ fromId, toId, cents, date, note });
+        let res;
+        try {
+          res = await addTransfer(input);
+        } catch (e) {
+          if (isNetworkError(e)) return keep(item);
+          throw e;
+        }
         if (!res.ok) return void toast.error(res.error);
         toast.success(`${formatCents(cents)} · ${res.message}`);
         setAmount("");
@@ -185,20 +247,37 @@ export function QuickAddSheet({
       return;
     }
     if (!categoryId || isTransfer) return;
+    const input = {
+      kind: kind as "expense" | "income",
+      amountCents: cents,
+      accountId,
+      categoryId,
+      date,
+      note,
+      // The bill's debt link only applies while it's still that bill's category.
+      paysAccountId:
+        kind === "expense" && categoryId === prefill?.categoryId
+          ? paysId
+          : null,
+      clientId,
+    };
+    const catName = [...(opts?.expense ?? []), ...(opts?.income ?? [])].find((c) => c.id === categoryId)?.name ?? "Entry";
+    const item = {
+      id: clientId,
+      kind: "tx" as const,
+      input,
+      cents: kind === "expense" ? -cents : cents,
+      label: `${note.trim() || catName} · ${account(accountId)}`,
+    };
+    if (offline) return keep(item);
     startSaving(async () => {
-      const res = await addTransaction({
-        kind: kind as "expense" | "income",
-        amountCents: cents,
-        accountId,
-        categoryId,
-        date,
-        note,
-        // The bill's debt link only applies while it's still that bill's category.
-        paysAccountId:
-          kind === "expense" && categoryId === prefill?.categoryId
-            ? paysId
-            : null,
-      });
+      let res;
+      try {
+        res = await addTransaction(input);
+      } catch (e) {
+        if (isNetworkError(e)) return keep(item);
+        throw e;
+      }
       if (!res.ok) {
         toast.error(res.error);
         return;
@@ -225,6 +304,7 @@ export function QuickAddSheet({
     note,
     paysId,
     prefill?.categoryId,
+    opts,
   ]);
 
   // Desktop: type the amount, Enter to save.

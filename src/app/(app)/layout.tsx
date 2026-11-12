@@ -1,6 +1,7 @@
 import { AppLock } from "@/components/app-lock";
 import { BottomTabBar } from "@/components/shell/bottom-tab-bar";
 import { Sidebar } from "@/components/shell/sidebar";
+import { SyncStatus } from "@/components/shell/sync-status";
 
 export default function AppLayout({ children }: LayoutProps<"/">) {
   return (
@@ -10,6 +11,7 @@ export default function AppLayout({ children }: LayoutProps<"/">) {
         <div className="mx-auto w-full max-w-6xl pt-4 md:pt-0">{children}</div>
       </main>
       <BottomTabBar />
+      <SyncStatus />
       <AppLock />
     </div>
   );
