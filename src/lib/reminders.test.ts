@@ -49,8 +49,11 @@ describe("payday and catch-up", () => {
     expect(paydayReminder("2026-11-19", "2026-11-20")).toBeNull();
   });
 
-  it("catch-up opens imports, once per Sunday", () => {
+  it("catch-up opens imports, once per Sunday, and names statements that are ready", () => {
     expect(catchupReminder("2026-11-15")).toMatchObject({ keys: ["catchup:2026-11-15"], url: "/imports" });
+    expect(catchupReminder("2026-11-22", ["Triangle Mastercard", "Costco CIBC Mastercard"]).body).toBe(
+      "Ready to import: Triangle Mastercard and Costco CIBC Mastercard. Then add this week's spending.",
+    );
   });
 
   it("lists names naturally", () => {

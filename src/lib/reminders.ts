@@ -60,6 +60,15 @@ export function paydayReminder(today: string, payday: string | null): Reminder |
   return { kind: "payday", keys: [`payday:${today}`], title: "Payday today", body: "Your paycheque should land today.", url: "/" };
 }
 
-export function catchupReminder(today: string): Reminder {
-  return { kind: "catchup", keys: [`catchup:${today}`], title: "Time to catch up", body: "Add this week's spending and import any new statements.", url: "/imports" };
+/** Sunday catch-up; names the statements that are out but not imported yet. */
+export function catchupReminder(today: string, statementsReady: string[] = []): Reminder {
+  return {
+    kind: "catchup",
+    keys: [`catchup:${today}`],
+    title: "Time to catch up",
+    body: statementsReady.length
+      ? `Ready to import: ${listNames(statementsReady)}. Then add this week's spending.`
+      : "Add this week's spending and check in with Claude.",
+    url: "/imports",
+  };
 }
