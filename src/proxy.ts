@@ -12,6 +12,8 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   // Claude's connector authenticates with its own token (src/app/api/mcp), not a browser session.
   if (pathname.startsWith("/api/mcp/")) return NextResponse.next();
+  // The weekly backup job authenticates with CRON_SECRET (src/app/api/cron).
+  if (pathname.startsWith("/api/cron/")) return NextResponse.next();
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 
   if (!isSupabaseConfigured) {
