@@ -2144,7 +2144,7 @@ export async function getNotificationSettings() {
   ]);
   return {
     configured: pushConfigured(),
-    publicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? null,
+    publicKey: process.env.VAPID_PUBLIC_KEY ?? null,
     prefs: { bills: p?.notify_bills ?? true, payday: p?.notify_payday ?? true, budget: p?.notify_budget ?? true, catchup: p?.notify_catchup ?? true },
     endpoints: subs.map((s) => s.endpoint),
   };

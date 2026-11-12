@@ -10,7 +10,7 @@ import type { Reminder, ReminderKind } from "@/lib/reminders";
  */
 type Db = SupabaseClient<Database>;
 
-export const pushConfigured = () => !!(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT);
+export const pushConfigured = () => !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT);
 
 const PREF: Record<Exclude<ReminderKind, "test">, "notify_bills" | "notify_payday" | "notify_budget" | "notify_catchup"> = {
   bills: "notify_bills",
@@ -26,7 +26,7 @@ const PREF: Record<Exclude<ReminderKind, "test">, "notify_bills" | "notify_payda
  */
 export async function deliver(db: Db, reminders: Reminder[]): Promise<number> {
   if (!pushConfigured() || !reminders.length) return 0;
-  webpush.setVapidDetails(process.env.VAPID_SUBJECT!, process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY!, process.env.VAPID_PRIVATE_KEY!);
+  webpush.setVapidDetails(process.env.VAPID_SUBJECT!, process.env.VAPID_PUBLIC_KEY!, process.env.VAPID_PRIVATE_KEY!);
 
   const [{ data: prefs }, { data: subs }, { data: logged }] = await Promise.all([
     db.from("profiles").select("notify_bills,notify_payday,notify_budget,notify_catchup").maybeSingle(),
