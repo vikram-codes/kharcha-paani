@@ -10,8 +10,7 @@ import { needsAdding, openOccurrence, OVERDUE_GRACE_DAYS, type LedgerHit } from 
 import { addDays, addMonths, monthKey, monthRange, todayISO, type ISODate, type MonthKey } from "./dates";
 import { loanState, payoffMonth } from "./loan";
 import { allocateCents } from "./money";
-import { cashForecast } from "./forecast";
-import { nextPayday, paydaysBetween, type HolidayRule } from "./paydays";
+import { nextPayday, type HolidayRule } from "./paydays";
 import { summarize, type CategoryInfo, type TxRow } from "./summary";
 
 /**
@@ -243,10 +242,6 @@ export type Upcoming = {
   categoryId: string | null;
   accountId: string | null;
   paysAccountId: string | null;
-  /** Schedule, for the cash forecast. */
-  cadence: string;
-  nextDate: ISODate;
-  endDate: ISODate | null;
 };
 
 /**
@@ -291,9 +286,6 @@ async function upcoming(db: Db, today: ISODate, cats: Map<string, CategoryInfo>)
       categoryId: r.category_id,
       accountId: r.account_id,
       paysAccountId: r.pays_account_id,
-      cadence: r.cadence,
-      nextDate: r.next_date as ISODate,
-      endDate: r.end_date as ISODate | null,
     });
   }
   return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -320,7 +312,7 @@ export async function getHome() {
   const { db, today } = await session();
   const month = monthKey(today);
   const cats = await categories(db);
-  const [bal, rows, income, bills, lines, owed, prof, emergencyMeta, paidToday] = await Promise.all([
+  const [bal, rows, income, bills, lines, owed, prof, emergencyMeta] = await Promise.all([
     balances(db),
     monthLedger(db, month, cats),
     incomeSettings(db),
@@ -329,8 +321,6 @@ export async function getHome() {
     db.from("shared_debts").select("amount_cents").is("settled_at", null).then(ok),
     profile(db),
     db.from("accounts").select("institution").eq("account_group", "cash_emergency").limit(1).maybeSingle().then(okMaybe),
-    // Money in today, to tell whether today's paycheque has landed already.
-    db.from("transactions").select("amount_cents,account:accounts!transactions_account_id_fkey(account_group)").eq("date", today).gt("amount_cents", 0).then(ok),
   ]);
   const { end } = monthRange(month);
   const bank = bal.filter((b) => b.account_group === "cash_bank");
@@ -368,39 +358,7 @@ export async function getHome() {
         return { id: b.account_id, name: b.name, cents: emergency || b.hidden ? null : b.balance_cents, emergency };
       }),
     upcoming: bills.slice(0, 3),
-    forecast: chequingForecast(bal, bills, income, today, paidToday),
   };
-}
-
-/**
- * Cash before payday (owner, Nov 11 2026): chequing through the next two
- * paydays, with the bills paid from chequing. Card bills aren't in it: they
- * leave chequing only when you pay the card.
- */
-function chequingForecast(
-  bal: Balance[],
-  bills: Upcoming[],
-  income: Awaited<ReturnType<typeof incomeSettings>>,
-  today: ISODate,
-  paidToday: { amount_cents: number; account: { account_group: string } | null }[],
-) {
-  const chequing = bal.find((b) => b.account_group === "cash_bank" && /chequing/i.test(b.key));
-  if (!chequing || !income) return null;
-  let paydays = paydaysBetween(income.schedule, today, addDays(today, 2 * income.schedule.everyDays + 7)).map((p) => p.paid);
-  // Today's pay already in? Then it's in the balance; start from the next one.
-  const landed = paidToday.some((t) => t.account?.account_group === "cash_bank" && Number(t.amount_cents) >= income.paycheque / 2);
-  if (paydays[0] === today && landed) paydays = paydays.slice(1);
-  paydays = paydays.slice(0, 2);
-  const f = cashForecast({
-    today,
-    start: chequing.balance_cents,
-    payCents: income.paycheque,
-    paydays,
-    bills: bills
-      .filter((b) => b.accountId === chequing.account_id && b.amount_cents < 0)
-      .map((b) => ({ name: b.name, cadence: b.cadence, nextDate: b.nextDate, open: b.date, endDate: b.endDate, cents: b.amount_cents })),
-  });
-  return { account: chequing.name, payCents: income.paycheque, ...f };
 }
 
 /**
