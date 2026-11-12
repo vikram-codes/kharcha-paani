@@ -19,15 +19,38 @@ const STATUS: Record<Row["status"], { label: string; tone: string }> = {
   new: { label: "New", tone: "text-money-in" },
   duplicate: { label: "Already saved", tone: "text-muted-foreground" },
   imported: { label: "Imported before", tone: "text-muted-foreground" },
-  possible: { label: "Possible duplicate", tone: "text-budget-high" },
+  possible: { label: "You added this?", tone: "text-budget-high" },
 };
+
+/** What happens to each statement row: saved as new, left out, or matched to an entry you added. */
+type Choice = "import" | "skip" | "link";
+const initialChoice = (r: Row): Choice => {
+  if (r.status === "new") return "import";
+  if (r.status !== "possible" || !r.match) return "skip";
+  // Names disagree: show it, but assume a different purchase unless you say otherwise.
+  if (!r.match.confident) return "import";
+  return r.match.linkable ? "link" : "skip";
+};
+
+/** "Your entry" explanation for a possible match (owner, Nov 11 2026). */
+function matchText(r: Row) {
+  const m = r.match!;
+  if (!m.linkable) return `Already imported: ${formatShort(m.date)} · ${m.label} · ${formatCents(m.amount_cents)}.`;
+  if (!m.confident) return `Same amount as ${m.label}, which you added on ${formatShort(m.date)}, but the names differ. Pick “Same purchase” only if it's that one.`;
+  if (m.kind === "combined") return `You added these on ${formatShort(m.date)}: ${m.label}, ${formatCents(m.amount_cents)} together.`;
+  if (m.kind === "close-amount")
+    return `You added ${m.label} for ${formatCents(m.amount_cents)} on ${formatShort(m.date)}. The statement says ${formatCents(r.amount_cents)}; yours will change to match.`;
+  return `You added ${m.label} for ${formatCents(m.amount_cents)} on ${formatShort(m.date)}.`;
+}
+
+const FROM: Record<string, string> = { rule: "your rule", history: "filed like before" };
 
 /** Upload a statement PDF → review every row → import (§4.3). Nothing is saved before Confirm. */
 export function ImportFlow() {
   const router = useRouter();
   const input = useRef<HTMLInputElement>(null);
   const [data, setData] = useState<PreviewOk | null>(null);
-  const [include, setInclude] = useState<boolean[]>([]);
+  const [choice, setChoice] = useState<Choice[]>([]);
   const [cats, setCats] = useState<(string | null)[]>([]);
   const [dragging, setDragging] = useState(false);
   const [reading, startReading] = useTransition();
@@ -41,7 +64,7 @@ export function ImportFlow() {
       const res = await previewImport(form);
       if (!res.ok) return void toast.error(res.error);
       setData(res);
-      setInclude(res.preview.rows.map((r) => r.status === "new"));
+      setChoice(res.preview.rows.map(initialChoice));
       setCats(res.preview.rows.map((r) => r.categoryId));
     });
   };
@@ -81,7 +104,9 @@ export function ImportFlow() {
 
   const p = data.preview;
   const allOk = p.checks.every((c) => c.ok);
-  const chosen = p.rows.map((r, i) => ({ r, i })).filter(({ i }) => include[i]);
+  const chosen = p.rows.map((r, i) => ({ r, i })).filter(({ i }) => choice[i] === "import");
+  const linking = p.rows.map((r, i) => ({ r, i })).filter(({ r, i }) => choice[i] === "link" && r.match?.linkable);
+  const setRow = (i: number, c: Choice) => setChoice((xs) => xs.map((x, j) => (j === i ? c : x)));
   const counts = p.rows.reduce<Record<string, number>>((m, r) => ((m[r.status] = (m[r.status] ?? 0) + 1), m), {});
   const catOptions = categoryOptions({ accounts: [], categories: data.categories });
   const kindOf = new Map(data.categories.map((c) => [c.id, c.kind]));
@@ -95,10 +120,15 @@ export function ImportFlow() {
         source: p.source,
         accountId: p.account.id,
         rows: chosen.map(({ r, i }) => ({ date: r.date, posted: r.posted, amount_cents: r.amount_cents, description: r.description, fingerprint: r.fingerprint, categoryId: cats[i] })),
-        skipped: p.rows.length - chosen.length,
+        links: linking.map(({ r }) => ({ existingIds: r.match!.ids, posted: r.posted, amount_cents: r.amount_cents, description: r.description, fingerprint: r.fingerprint })),
+        skipped: p.rows.length - chosen.length - linking.length,
       });
       if (!res.ok) return void toast.error(res.error);
-      toast.success(`Imported ${res.imported} transactions into ${p.account.name}`);
+      toast.success(
+        `Imported ${res.imported} into ${p.account.name}` +
+          (res.linked ? ` · matched ${res.linked} you'd added` : "") +
+          (res.kept ? ` (kept your amount on ${res.kept} split or transfer)` : ""),
+      );
       reset();
       notifyDataChanged();
       router.refresh();
@@ -127,19 +157,19 @@ export function ImportFlow() {
         </ul>
         {!allOk && <p className="mt-2 text-xs text-budget-over">The statement doesn&apos;t add up. Some rows may have been missed, so check carefully.</p>}
         <p className="mt-3 text-xs text-muted-foreground">
-          {p.rows.length} rows · {counts.new ?? 0} new · {(counts.duplicate ?? 0) + (counts.imported ?? 0)} already saved · {counts.possible ?? 0} to check
+          {p.rows.length} rows · {counts.new ?? 0} new · {(counts.duplicate ?? 0) + (counts.imported ?? 0)} already saved · {counts.possible ?? 0} matched to what you added
         </p>
       </section>
 
       <div className="divide-y divide-border rounded-2xl bg-surface-1 px-3">
         {p.rows.map((r, i) => (
-          <div key={r.fingerprint} className={cn("flex flex-col gap-2 py-3", !include[i] && "opacity-50")}>
+          <div key={r.fingerprint} className={cn("flex flex-col gap-2 py-3", choice[i] === "skip" && "opacity-50")}>
             <div className="flex items-center gap-3">
-              <label className="relative grid size-5 shrink-0 cursor-pointer place-items-center">
+              <label className={cn("relative grid size-5 shrink-0 cursor-pointer place-items-center", r.match && r.status === "possible" && "invisible")}>
                 <input
                   type="checkbox"
-                  checked={include[i]}
-                  onChange={(e) => setInclude((xs) => xs.map((x, j) => (j === i ? e.target.checked : x)))}
+                  checked={choice[i] === "import"}
+                  onChange={(e) => setRow(i, e.target.checked ? "import" : "skip")}
                   className="peer size-5 cursor-pointer appearance-none rounded-md bg-surface-2 ring-1 ring-border transition-colors duration-(--duration-fast) checked:bg-lime checked:ring-lime focus-visible:ring-2 focus-visible:ring-lime"
                   aria-label={`Import ${r.merchant}`}
                 />
@@ -150,6 +180,7 @@ export function ImportFlow() {
                 <span className="text-xs text-muted-foreground">
                   {formatShort(r.date)} · <span className={STATUS[r.status].tone}>{STATUS[r.status].label}</span>
                   {isPayment(i) && <span> · {r.amount_cents > 0 ? "Card payment" : "Transfer"}</span>}
+                  {choice[i] === "import" && r.categoryFrom && FROM[r.categoryFrom] && cats[i] === r.categoryId && <span> · {FROM[r.categoryFrom]}</span>}
                 </span>
               </span>
               <span className={cn("num shrink-0 text-sm font-medium", r.amount_cents > 0 && !isPayment(i) && "text-money-in", isPayment(i) && "text-muted-foreground")}>
@@ -157,11 +188,30 @@ export function ImportFlow() {
               </span>
             </div>
             {r.match && r.status === "possible" && (
-              <p className="ml-8 rounded-lg bg-surface-2 px-2 py-1 text-[11px] text-muted-foreground">
-                Matches {formatShort(r.match.date)} · {r.match.note || r.match.description} · {formatCents(r.match.amount_cents)}. Tick it only if it&apos;s a different purchase.
-              </p>
+              <div className="ml-8 flex flex-col gap-2 rounded-xl bg-surface-2 p-2.5">
+                <p className="text-[11px] text-muted-foreground">{matchText(r)}</p>
+                <div className="grid grid-cols-2 gap-1 rounded-lg bg-surface-1 p-1 text-xs font-medium" role="radiogroup" aria-label={`${r.merchant}: same purchase or different?`}>
+                  {(
+                    [
+                      [r.match.linkable ? "link" : "skip", "Same purchase"],
+                      ["import", "Different purchase"],
+                    ] as const
+                  ).map(([c, label]) => (
+                    <button
+                      key={c}
+                      type="button"
+                      role="radio"
+                      aria-checked={choice[i] === c}
+                      onClick={() => setRow(i, c)}
+                      className={cn("rounded-md px-2 py-1.5", choice[i] === c ? "bg-surface-3 text-foreground" : "text-muted-foreground")}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
-            {include[i] && (
+            {choice[i] === "import" && (
               <div className="ml-8">
                 <ThemedSelect
                   size="sm"
@@ -182,10 +232,16 @@ export function ImportFlow() {
         <button
           type="button"
           onClick={commit}
-          disabled={saving || chosen.length === 0}
+          disabled={saving || chosen.length + linking.length === 0}
           className="flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-lime font-semibold text-on-lime shadow-lg transition-transform duration-(--duration-fast) active:scale-[0.98] disabled:opacity-40"
         >
-          {saving ? <Loader2 className="size-5 animate-spin" /> : `Import ${chosen.length} transaction${chosen.length === 1 ? "" : "s"}`}
+          {saving ? (
+            <Loader2 className="size-5 animate-spin" />
+          ) : chosen.length || !linking.length ? (
+            `Import ${chosen.length} transaction${chosen.length === 1 ? "" : "s"}${linking.length ? ` · match ${linking.length}` : ""}`
+          ) : (
+            `Match ${linking.length} to what you added`
+          )}
         </button>
       </div>
     </div>

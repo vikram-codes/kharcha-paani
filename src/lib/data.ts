@@ -1041,6 +1041,23 @@ export async function deleteTransaction(id: string) {
 
 // ───────────────────────────── statement import (§4.3) ─────────────────────────────
 
+/** Categorised transactions since `since` (all accounts), to learn how you file each merchant. */
+async function pastCategories(db: Db, since: ISODate) {
+  const page = (from: number) =>
+    db
+      .from("transactions")
+      .select("description,amount_cents,category_id,source")
+      .not("category_id", "is", null)
+      .gte("date", since)
+      .order("date", { ascending: false })
+      .order("id")
+      .range(from, from + PAGE - 1)
+      .then(ok);
+  const rows = await page(0);
+  for (let from = PAGE, last = rows; last.length === PAGE && from < 10 * PAGE; from += PAGE) rows.push(...(last = await page(from)));
+  return rows;
+}
+
 export type ImportPreviewRow = {
   date: ISODate;
   posted: ISODate | null;
@@ -1050,14 +1067,28 @@ export type ImportPreviewRow = {
   fingerprint: string;
   status: "new" | "duplicate" | "possible" | "imported";
   /** What it matched (for duplicate / possible). */
-  match: { date: ISODate; amount_cents: number; description: string; note: string | null } | null;
+  match: {
+    ids: string[];
+    kind: "same-amount" | "close-amount" | "combined" | null;
+    date: ISODate;
+    /** Total of the matched entries. */
+    amount_cents: number;
+    /** "Eating out", or "Groceries + Slipper" for two entries. */
+    label: string;
+    /** Entries you added yourself (not an earlier import): "same purchase" links them to this row. */
+    linkable: boolean;
+    /** False when the names disagree: shown, but "different purchase" is the default. */
+    confident: boolean;
+  } | null;
   categoryId: string | null;
+  /** Where the suggested category came from. */
+  categoryFrom: "rule" | "history" | "guess" | null;
 };
 
 /** Reads a statement PDF and returns what would be imported. Saves nothing. */
 export async function previewStatement(bytes: Uint8Array, fileName: string) {
   const { db } = await authed();
-  const [{ pdfToLayoutText }, { parseStatement }, { matchDuplicates, fingerprints }, { suggestCategory }, { cleanMerchant }] = await Promise.all([
+  const [{ pdfToLayoutText }, { parseStatement }, { matchDuplicates, fingerprints, historyCategories }, { suggestCategory }, { cleanMerchant }] = await Promise.all([
     import("./import/pdf-text"),
     import("./import/statements"),
     import("./import/dedupe"),
@@ -1073,21 +1104,43 @@ export async function previewStatement(bytes: Uint8Array, fileName: string) {
   const dates = parsed.rows.map((r) => r.date).sort();
   const from = addDays(dates[0], -3);
   const to = addDays(dates[dates.length - 1], 3);
-  const [existing, cats] = await Promise.all([
-    db.from("transactions").select("id,date,amount_cents,description,note,fingerprint").eq("account_id", account.id).gte("date", from).lte("date", to).limit(2000).then(ok),
+  const [existing, cats, past] = await Promise.all([
+    db.from("transactions").select("id,date,amount_cents,description,note,fingerprint,source").eq("account_id", account.id).gte("date", from).lte("date", to).limit(2000).then(ok),
     categories(db),
+    pastCategories(db, addDays(dates[0], -540)),
   ]);
   const prints = fingerprints(parsed.rows);
   const taken = new Set(existing.map((e) => e.fingerprint).filter(Boolean));
+  const catNames = new Set([...cats.values()].map((c) => c.name.toLowerCase()));
+  // Words that name merchants on your statements (not category words like "groceries").
+  const wordsOf = (t: string) => t.toLowerCase().match(/[a-z]{4,}/g) ?? [];
+  const catWords = new Set([...catNames].flatMap(wordsOf));
+  const merchantWords = new Set(
+    past.filter((p) => p.source === "import" || p.source === "seed").flatMap((p) => wordsOf(cleanMerchant(p.description)).filter((w) => !catWords.has(w))),
+  );
   const matches = matchDuplicates(
     parsed.rows,
-    existing.map((e) => ({ id: e.id, date: e.date, amount_cents: Number(e.amount_cents), description: e.description })),
+    existing.map((e) => ({
+      id: e.id,
+      date: e.date,
+      amount_cents: Number(e.amount_cents),
+      description: e.description,
+      source: e.source,
+      note: e.note,
+      // Names a merchant: a bank string you copied in ("EMIRATES 1176…"), or your
+      // words include one from your statements ("Amazon: household items").
+      bankLike:
+        (!!e.description && e.description !== e.note && !catNames.has(e.description.toLowerCase()) && /[A-Z]{3,}|\d{4,}|\*/.test(e.description)) ||
+        wordsOf(`${e.note ?? ""} ${e.description}`).some((w) => merchantWords.has(w)),
+    })),
   );
   const byKey = new Map([...cats.values()].map((c) => [c.key, c.id]));
   const byId = new Map(existing.map((e) => [e.id, e]));
   // Owner rules ("always put X in Y") win over the built-in suggestions.
   const { merchantKey } = await import("./recurring");
   const rules = await userRules(db);
+  // Then how you filed the same merchant before, then the built-in guesses.
+  const historyFor = historyCategories(past.map((p) => ({ key: merchantKey(p.description), amount_cents: Number(p.amount_cents), categoryId: p.category_id! })));
   const ruleFor = (desc: string) => {
     const k = merchantKey(desc);
     for (const r of rules) {
@@ -1099,16 +1152,29 @@ export async function previewStatement(bytes: Uint8Array, fileName: string) {
 
   const rows: ImportPreviewRow[] = parsed.rows.map((r, i) => {
     const m = matches[i];
-    const hit = m.existingId ? byId.get(m.existingId) : undefined;
+    const hits = (m.existingIds ?? []).map((id) => byId.get(id)).filter((h) => !!h);
     const ruled = ruleFor(r.description);
-    const key = ruled ? null : suggestCategory(r.description, r.amount_cents);
+    const usual = ruled ? null : historyFor(merchantKey(r.description), r.amount_cents);
+    const key = ruled || usual ? null : suggestCategory(r.description, r.amount_cents);
+    const guessed = key ? (byKey.get(key) ?? null) : null;
     return {
       ...r,
       merchant: cleanMerchant(r.description),
       fingerprint: prints[i],
       status: taken.has(prints[i]) ? "imported" : m.status,
-      match: hit ? { date: hit.date as ISODate, amount_cents: Number(hit.amount_cents), description: hit.description, note: hit.note } : null,
-      categoryId: ruled ?? (key ? (byKey.get(key) ?? null) : null),
+      match: hits.length
+        ? {
+            ids: hits.map((h) => h.id),
+            kind: m.kind ?? null,
+            date: hits[0].date as ISODate,
+            amount_cents: hits.reduce((t, h) => t + Number(h.amount_cents), 0),
+            label: hits.map((h) => h.note || cleanMerchant(h.description)).join(" + "),
+            linkable: hits.every((h) => !h.fingerprint && (h.source === "manual" || h.source === "mcp")),
+            confident: m.confident !== false,
+          }
+        : null,
+      categoryId: ruled ?? usual ?? guessed,
+      categoryFrom: ruled ? "rule" : usual ? "history" : guessed ? "guess" : null,
     };
   });
 
@@ -1127,8 +1193,57 @@ export type ImportCommit = {
   source: string;
   accountId: string;
   rows: { date: ISODate; posted: ISODate | null; amount_cents: number; description: string; fingerprint: string; categoryId: string | null }[];
+  /** Statement rows that are entries you'd already added ("same purchase"). */
+  links?: { existingIds: string[]; posted: ISODate | null; amount_cents: number; description: string; fingerprint: string }[];
   skipped: number;
 };
+
+/**
+ * "Same purchase": your hand-entered entry takes the statement's details. It
+ * gets the statement row's fingerprint (so this row never imports again), the
+ * bank's description (shown as the merchant; your note stays) and the posted date. A
+ * single entry also takes the statement's amount (the tip, the exchange rate),
+ * unless it's split or one side of a transfer; then your amount is kept.
+ * Not part of the import: undoing the import leaves your entries alone.
+ */
+async function linkToStatement(db: Db, accountId: string, links: NonNullable<ImportCommit["links"]>) {
+  const ids = [...new Set(links.flatMap((l) => l.existingIds))].slice(0, 1000);
+  if (!ids.length) return { linked: 0, kept: 0 };
+  const rows = ok(
+    await db.from("transactions").select("id,account_id,amount_cents,note,description,fingerprint,source,transfer_pair_id,transaction_splits(id)").in("id", ids),
+  );
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  let linked = 0;
+  let kept = 0;
+  for (const l of links) {
+    const mine = l.existingIds.map((id) => byId.get(id));
+    // Only your own unlinked entries on this account.
+    if (!mine.length || mine.some((m) => !m || m.account_id !== accountId || m.fingerprint || !["manual", "mcp"].includes(m.source))) continue;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(l.posted ?? "") && l.posted !== null) continue;
+    if (typeof l.fingerprint !== "string" || !l.fingerprint || l.fingerprint.length > 400) continue;
+    const [first] = mine as NonNullable<(typeof mine)[number]>[];
+    const single = mine.length === 1;
+    const canReprice = single && !first.transfer_pair_id && first.transaction_splits.length === 0;
+    if (single && Number(first.amount_cents) !== l.amount_cents && !canReprice) kept++;
+    const bank = l.description.slice(0, 300);
+    ok(
+      await db
+        .from("transactions")
+        .update({
+          fingerprint: l.fingerprint,
+          posted_date: l.posted,
+          needs_review: false,
+          ...(single
+            ? { description: bank, ...(canReprice && Number.isInteger(l.amount_cents) && l.amount_cents !== 0 ? { amount_cents: l.amount_cents } : {}) }
+            : {}),
+        })
+        .eq("id", first.id)
+        .select("id"),
+    );
+    linked++;
+  }
+  return { linked, kept };
+}
 
 /** Saves the confirmed rows as one import (undoable). Re-checks fingerprints so nothing is saved twice. */
 export async function commitStatementImport(input: ImportCommit) {
@@ -1157,7 +1272,7 @@ export async function commitStatementImport(input: ImportCommit) {
         source: input.source,
         row_count: input.rows.length + input.skipped,
         imported_count: fresh.length,
-        skipped_count: input.skipped + (rows.length - fresh.length),
+        skipped_count: input.skipped + (rows.length - fresh.length) + (input.links?.length ?? 0),
         status: "committed",
       })
       .select("id"),
@@ -1184,7 +1299,8 @@ export async function commitStatementImport(input: ImportCommit) {
         .select("id"),
     );
   }
-  return { imported: fresh.length, importId: imp.id };
+  const { linked, kept } = await linkToStatement(db, account.id, input.links ?? []);
+  return { imported: fresh.length, importId: imp.id, linked, kept };
 }
 
 export async function listImports() {
