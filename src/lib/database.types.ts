@@ -115,6 +115,7 @@ export type Database = {
           last_used_at: string | null
           name: string
           revoked_at: string | null
+          scope: string
           token_hash: string
           user_id: string
         }
@@ -124,6 +125,7 @@ export type Database = {
           last_used_at?: string | null
           name: string
           revoked_at?: string | null
+          scope?: string
           token_hash: string
           user_id?: string
         }
@@ -133,6 +135,7 @@ export type Database = {
           last_used_at?: string | null
           name?: string
           revoked_at?: string | null
+          scope?: string
           token_hash?: string
           user_id?: string
         }
@@ -630,6 +633,7 @@ export type Database = {
           last_backup_emailed_at: string | null
           last_export_at: string | null
           monthly_budget_cents: number | null
+          notify_applepay: boolean
           notify_bills: boolean
           notify_budget: boolean
           notify_catchup: boolean
@@ -646,6 +650,7 @@ export type Database = {
           last_backup_emailed_at?: string | null
           last_export_at?: string | null
           monthly_budget_cents?: number | null
+          notify_applepay?: boolean
           notify_bills?: boolean
           notify_budget?: boolean
           notify_catchup?: boolean
@@ -662,6 +667,7 @@ export type Database = {
           last_backup_emailed_at?: string | null
           last_export_at?: string | null
           monthly_budget_cents?: number | null
+          notify_applepay?: boolean
           notify_bills?: boolean
           notify_budget?: boolean
           notify_catchup?: boolean
@@ -1183,6 +1189,42 @@ export type Database = {
             columns: ["transfer_pair_id"]
             isOneToOne: false
             referencedRelation: "transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      wallet_cards: {
+        Row: {
+          account_id: string
+          last_seen_at: string
+          user_id: string
+          wallet_name: string
+        }
+        Insert: {
+          account_id: string
+          last_seen_at?: string
+          user_id?: string
+          wallet_name: string
+        }
+        Update: {
+          account_id?: string
+          last_seen_at?: string
+          user_id?: string
+          wallet_name?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "wallet_cards_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "account_balances"
+            referencedColumns: ["account_id"]
+          },
+          {
+            foreignKeyName: "wallet_cards_account_id_fkey"
+            columns: ["account_id"]
+            isOneToOne: false
+            referencedRelation: "accounts"
             referencedColumns: ["id"]
           },
         ]

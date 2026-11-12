@@ -59,7 +59,8 @@ export const closeEnough = (statement: number, mine: number) =>
 
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 16);
 const days = (a: string, b: string) => Math.abs(Date.parse(a) - Date.parse(b)) / 86_400_000;
-const byHand = (e: Existing) => e.source === "manual" || e.source === "mcp";
+/** Entries you added (quick add, Claude, Apple Pay): their amounts may be a little off the statement's. */
+const byHand = (e: Existing) => e.source === "manual" || e.source === "mcp" || e.source === "applepay";
 
 export function matchDuplicates(incoming: readonly Incoming[], existing: readonly Existing[]): Match[] {
   const used = new Set<string>();
