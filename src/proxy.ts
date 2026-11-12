@@ -54,6 +54,6 @@ function withCookies(target: NextResponse, source: NextResponse) {
 export const config = {
   matcher: [
     // Everything except Next internals and static files (icons, manifest, images).
-    "/((?!_next/static|_next/image|favicon.ico|icon.svg|manifest.webmanifest|.*\\.(?:svg|png|jpg|jpeg|webp|ico)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|icon.svg|manifest.webmanifest|sw.js|.*\\.(?:svg|png|jpg|jpeg|webp|ico)$).*)",
   ],
 };
