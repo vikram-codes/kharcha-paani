@@ -13,6 +13,7 @@ import {
   getEditOptions,
   getCheckup,
   getHome,
+  getRecurringCharges,
   getStudentLoan,
   getBudgets,
   historySummaryData,
@@ -33,7 +34,8 @@ export const INSTRUCTIONS = `Kharcha-Paani is the owner's personal finance app (
 Money model: Cash = bank accounts (the emergency fund is private and never shown here). Debts = credit cards + Affirm; the student loan (India, 9.5%) is separate. Card purchases count as spending when made and raise that card's debt; card payments are transfers, not spending.
 Budget: a monthly headline budget plus fixed and variable lines. "Spent" excludes transfers, friend paybacks and balance adjustments.
 Writing (full access: add, edit, move, delete, split, balances, owed money, bills, budget, rules, goals, investments): NEVER save without the owner's explicit yes. Always call the matching draft_* tool first (draft_transactions for new purchases/income, draft_transfer for card payments, draft_edit_transaction / draft_delete_transactions with ids from list_transactions, etc.), show the preview lines to the owner, and call confirm_draft only after they clearly agree in this conversation. If the draft reports problems (unclear category/account), ask the owner instead of guessing.
-Weekly check-in: the owner gets a Sunday 3 pm reminder to catch up and then talks to you. When they check in, or ask what needs attention, call get_checkup first. Tell them which statements are ready to import (by account, and how many if more than one is missed), and list any uncategorized transactions, suggesting a category for each from list_categories_and_accounts; file them only with draft_edit_transaction and their yes. If nothing needs attention, say so in one line.
+Weekly check-in: the owner gets a Sunday 3 pm reminder to catch up and then talks to you. When they check in, or ask what needs attention, call get_checkup first. Tell them which statements are ready to import (by account, and how many if more than one is missed), and list any uncategorized transactions, suggesting a category for each from list_categories_and_accounts; file them only with draft_edit_transaction and their yes. Also mention any subscription price changes it lists. If nothing needs attention, say so in one line.
+Subscriptions and recurring charges: use get_subscriptions (monthly and yearly totals, by group, with price changes and ones that stopped).
 Amounts in tool results are dollars. Expenses are negative in transaction lists.`;
 
 const $ = (c: number) => Math.round(c) / 100;
@@ -128,9 +130,13 @@ export function registerTools(server: McpServer) {
     },
     async () => {
       try {
-        const c = await getCheckup();
+        const [c, rec] = await Promise.all([getCheckup(), getRecurringCharges()]);
+        const recent = (d: string) => Date.parse(c.today) - Date.parse(d) <= 45 * 86_400_000;
         return text({
           today: c.today,
+          subscription_price_changes: rec.items
+            .filter((r) => r.active && r.priceChange && recent(r.priceChange.on))
+            .map((r) => ({ name: r.merchant, from: $(r.priceChange!.fromCents), to: $(r.priceChange!.toCents), on: r.priceChange!.on, account: r.account })),
           statements: c.statements.map((s) => ({
             account: s.account,
             last_statement_imported: s.lastEnd ?? "never",
@@ -144,6 +150,55 @@ export function registerTools(server: McpServer) {
             account: u.account,
             note: u.note ?? undefined,
           })),
+        });
+      } catch (e) {
+        return fail(e);
+      }
+    },
+  );
+
+  server.registerTool(
+    "get_subscriptions",
+    {
+      title: "Subscriptions and recurring charges",
+      description:
+        "Recurring charges: found in ~2 years of history (same merchant about monthly or yearly at a steady price) plus the owner's monthly bills. Monthly and yearly totals overall and by group (e.g. Subscriptions, Bills, Housing), each charge's price, next expected date and any price change, and ones that stopped.",
+      inputSchema: z.object({}),
+      annotations: READ,
+    },
+    async () => {
+      try {
+        const { today, items } = await getRecurringCharges();
+        const active = items.filter((i) => i.active);
+        const byGroup = new Map<string, { monthly: number; yearly: number; count: number }>();
+        for (const i of active) {
+          const g = byGroup.get(i.group ?? "Other") ?? { monthly: 0, yearly: 0, count: 0 };
+          byGroup.set(i.group ?? "Other", { monthly: g.monthly + i.monthlyCents, yearly: g.yearly + i.yearlyCents, count: g.count + 1 });
+        }
+        return text({
+          today,
+          totals: {
+            per_month: $(active.reduce((t, i) => t + i.monthlyCents, 0)),
+            per_year: $(active.reduce((t, i) => t + i.yearlyCents, 0)),
+            by_group: Object.fromEntries([...byGroup].map(([g, v]) => [g, { per_month: $(v.monthly), per_year: $(v.yearly), count: v.count }])),
+          },
+          recurring: active.map((i) => ({
+            name: i.merchant,
+            category: i.category ?? undefined,
+            group: i.group ?? undefined,
+            account: i.account || undefined,
+            cadence: i.cadence,
+            price: $(i.cents),
+            per_month: $(i.monthlyCents),
+            per_year: $(i.yearlyCents),
+            last_charged: i.lastDate ?? undefined,
+            next_expected: i.nextDate,
+            set_up_as_bill: i.isBill || undefined,
+            price_change: i.priceChange ? `${$(i.priceChange.fromCents)} → ${$(i.priceChange.toCents)} on ${i.priceChange.on}` : undefined,
+          })),
+          stopped: items
+            .filter((i) => !i.active && i.lastDate && Date.parse(today) - Date.parse(i.lastDate) <= 400 * 86_400_000)
+            .map((i) => ({ name: i.merchant, price: $(i.cents), last_charged: i.lastDate })),
         });
       } catch (e) {
         return fail(e);

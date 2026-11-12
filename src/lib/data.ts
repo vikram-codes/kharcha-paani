@@ -2240,3 +2240,65 @@ export async function getCheckup() {
     })),
   };
 }
+
+// ───────────────────────────── subscriptions for Claude (#6, owner, Nov 11 2026) ─────────────────────────────
+
+/**
+ * Recurring charges: found in the last ~2 years of history (monthly or
+ * yearly at a steady price, price changes reported) plus your monthly bills.
+ */
+export async function getRecurringCharges() {
+  const { db, today } = await authed();
+  const { findRecurring, withBills } = await import("./subscriptions");
+  const cats = await categories(db);
+  const since = addDays(today, -760);
+  const page = (from: number) =>
+    db
+      .from("transactions")
+      .select("date,amount_cents,description,account_id,category_id")
+      .gte("date", since)
+      .lt("amount_cents", 0)
+      .eq("is_transfer", false)
+      .eq("in_reports", true)
+      .order("id")
+      .range(from, from + PAGE - 1)
+      .then(ok);
+  const [first, series, accounts] = await Promise.all([
+    page(0),
+    db.from("recurring_series").select("id,name,amount_cents,cadence,next_date,end_date,category_id,account_id").eq("active", true).eq("cadence", "monthly").then(ok),
+    db.from("accounts").select("id,name").then(ok),
+  ]);
+  // Each bill's next date that isn't recorded yet (a charge already added moves it on).
+  const openDate = new Map((await upcoming(db, today, cats)).map((u) => [u.id, u.date]));
+  const rows = [...first];
+  for (let from = PAGE, last = first; last.length === PAGE && from < 10 * PAGE; from += PAGE) rows.push(...(last = await page(from)));
+  const acct = new Map(accounts.map((a) => [a.id, a.name]));
+  const cat = (id: string | null) => (id ? cats.get(id) : undefined);
+  const found = findRecurring(
+    rows.map((r) => ({
+      date: r.date as ISODate,
+      amount_cents: Number(r.amount_cents),
+      description: r.description,
+      account: acct.get(r.account_id) ?? "",
+      category: cat(r.category_id)?.name ?? null,
+      group: cat(r.category_id)?.parentName ?? null,
+    })),
+    today,
+  );
+  const items = withBills(
+    found,
+    series
+      .filter((s) => Number(s.amount_cents) < 0)
+      .map((s) => ({
+        name: s.name,
+        cents: -Number(s.amount_cents),
+        category: cat(s.category_id)?.name ?? null,
+        group: cat(s.category_id)?.parentName ?? null,
+        account: (s.account_id && acct.get(s.account_id)) || "",
+        nextDate: openDate.get(s.id) ?? (s.next_date as ISODate),
+        endDate: s.end_date as ISODate | null,
+      })),
+    today,
+  );
+  return { today, items };
+}
