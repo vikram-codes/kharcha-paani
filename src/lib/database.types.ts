@@ -490,6 +490,24 @@ export type Database = {
         }
         Relationships: []
       }
+      notification_log: {
+        Row: {
+          key: string
+          sent_at: string
+          user_id: string
+        }
+        Insert: {
+          key: string
+          sent_at?: string
+          user_id?: string
+        }
+        Update: {
+          key?: string
+          sent_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       paycheques: {
         Row: {
           actual_date: string | null
@@ -533,6 +551,10 @@ export type Database = {
           last_backup_emailed_at: string | null
           last_export_at: string | null
           monthly_budget_cents: number | null
+          notify_bills: boolean
+          notify_budget: boolean
+          notify_catchup: boolean
+          notify_payday: boolean
           pin_failed_count: number
           pin_locked_until: string | null
           updated_at: string
@@ -545,6 +567,10 @@ export type Database = {
           last_backup_emailed_at?: string | null
           last_export_at?: string | null
           monthly_budget_cents?: number | null
+          notify_bills?: boolean
+          notify_budget?: boolean
+          notify_catchup?: boolean
+          notify_payday?: boolean
           pin_failed_count?: number
           pin_locked_until?: string | null
           updated_at?: string
@@ -557,6 +583,10 @@ export type Database = {
           last_backup_emailed_at?: string | null
           last_export_at?: string | null
           monthly_budget_cents?: number | null
+          notify_bills?: boolean
+          notify_budget?: boolean
+          notify_catchup?: boolean
+          notify_payday?: boolean
           pin_failed_count?: number
           pin_locked_until?: string | null
           updated_at?: string
@@ -578,6 +608,39 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      push_subscriptions: {
+        Row: {
+          auth: string
+          created_at: string
+          device: string | null
+          endpoint: string
+          id: string
+          last_sent_at: string | null
+          p256dh: string
+          user_id: string
+        }
+        Insert: {
+          auth: string
+          created_at?: string
+          device?: string | null
+          endpoint: string
+          id?: string
+          last_sent_at?: string | null
+          p256dh: string
+          user_id?: string
+        }
+        Update: {
+          auth?: string
+          created_at?: string
+          device?: string | null
+          endpoint?: string
+          id?: string
+          last_sent_at?: string | null
+          p256dh?: string
+          user_id?: string
+        }
+        Relationships: []
       }
       recurring_series: {
         Row: {

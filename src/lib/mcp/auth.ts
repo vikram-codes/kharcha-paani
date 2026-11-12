@@ -1,9 +1,8 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
-import { adminClient } from "@/lib/supabase/admin";
-import { supabasePublishableKey, supabaseUrl } from "@/lib/supabase/env";
+import { adminClient, sessionFor, userClient } from "@/lib/supabase/admin";
 
 /**
  * Connector links: https://<app>/api/mcp/<token>. The token is 32 random bytes;
@@ -32,28 +31,13 @@ export async function clientForToken(token: string): Promise<SupabaseClient<Data
   }
   const cached = sessions.get(hash);
   if (cached && cached.expiresAt - Date.now() > 60_000) return userClient(cached.accessToken);
-  const { data: user } = await a.auth.admin.getUserById(row.user_id);
-  if (!user?.user?.email) return null;
-
-  // A one-time login link is generated server-side (no email is sent) and exchanged for a session.
-  const { data: link, error } = await a.auth.admin.generateLink({ type: "magiclink", email: user.user.email });
-  if (error || !link.properties?.hashed_token) return null;
-  const anon = createClient<Database>(supabaseUrl, supabasePublishableKey, { auth: { persistSession: false, autoRefreshToken: false } });
-  const { data: verified } = await anon.auth.verifyOtp({ token_hash: link.properties.hashed_token, type: "magiclink" });
-  if (!verified.session) return null;
-
-  sessions.set(hash, { userId: row.user_id, accessToken: verified.session.access_token, expiresAt: (verified.session.expires_at ?? 0) * 1000 });
+  const session = await sessionFor(row.user_id);
+  if (!session) return null;
+  sessions.set(hash, { userId: row.user_id, accessToken: session.accessToken, expiresAt: session.expiresAt });
   if (!row.last_used_at || Date.now() - Date.parse(row.last_used_at) > 3_600_000) {
     await a.from("api_tokens").update({ last_used_at: new Date().toISOString() }).eq("id", row.id);
   }
-  return userClient(verified.session.access_token);
-}
-
-function userClient(accessToken: string) {
-  return createClient<Database>(supabaseUrl, supabasePublishableKey, {
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  return session.client;
 }
 
 /** Forget cached sessions (after a revoke on this instance). */
