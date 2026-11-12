@@ -1,19 +1,29 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Archive, ChevronRight, Download, Loader2, Mail, TriangleAlert } from "lucide-react";
+import { Archive, ChevronRight, Download, FileJson, FileSpreadsheet, Loader2, Lock, Mail, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import { downloadBackup, emailBackupNow } from "@/app/actions/backup";
 import { PinPad } from "@/components/pin-pad";
 import { ResponsiveSheetContent } from "@/components/ui/responsive-sheet";
 import { Sheet, SheetDescription, SheetTitle } from "@/components/ui/sheet";
-import { daysBetween, formatDay, todayISO } from "@/lib/dates";
+import { addMonths, daysBetween, formatDay, formatShort, todayISO } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 
 export type BackupStatus = { emailedAt: string | null; exportedAt: string | null; emailReady: boolean; emailConfigured: boolean };
 
-/** The weekly email is late after this many days (it runs every Sunday). */
-const LATE_DAYS = 9;
+/** The monthly email (1st of each month) is late after this many days. */
+const LATE_DAYS = 35;
+
+/** The 1st of next month: when the next automatic email goes out. */
+const nextFirst = () => addMonths(`${todayISO().slice(0, 7)}-01`, 1);
+
+/** What's in the zip, for the sheet. */
+const CONTENTS = [
+  { icon: FileSpreadsheet, label: "transactions.csv", hint: "Every transaction, for Numbers or Sheets" },
+  { icon: FileSpreadsheet, label: "accounts.csv", hint: "Accounts and their balances" },
+  { icon: FileJson, label: "backup.json", hint: "A full copy, enough to rebuild the app" },
+];
 
 const when = (ts: string) => {
   const day = todayISO(new Date(ts));
@@ -34,7 +44,7 @@ export function BackupRow({ status }: { status: BackupStatus }) {
   const [ready, setReady] = useState<{ fileName: string; zip: Uint8Array } | null>(null);
   const [saving, startSaving] = useTransition();
   const late = status.emailReady && !!status.emailedAt && daysBetween(todayISO(new Date(status.emailedAt)), todayISO()) > LATE_DAYS;
-  const weekly = !status.emailReady ? "Not set up yet" : status.emailedAt ? `Sent ${when(status.emailedAt)}` : "On · first one this Sunday";
+  const next = nextFirst();
 
   const close = () => {
     setOpen(false);
@@ -74,7 +84,7 @@ export function BackupRow({ status }: { status: BackupStatus }) {
         <span className="min-w-0 flex-1">
           <span className="block text-sm font-medium">Backup</span>
           <span className={cn("block truncate text-xs", late ? "text-budget-high" : "text-muted-foreground")}>
-            {late ? "Weekly email is late" : "Download or email everything"}
+            {late ? "Monthly email is late" : status.emailReady ? `Emailed on the 1st · next ${formatShort(next)}` : "Download or email everything"}
           </span>
         </span>
         <ChevronRight className="size-4 text-muted-foreground" />
@@ -89,7 +99,7 @@ export function BackupRow({ status }: { status: BackupStatus }) {
                 {ready
                   ? `${ready.fileName} · ${(ready.zip.byteLength / 1024).toFixed(0)} KB. Save it to Files or iCloud Drive.`
                   : step === "menu"
-                    ? "Everything in one zip: spreadsheet files and a full copy."
+                    ? "A full copy of everything, in one zip. It's emailed to you on the 1st of every month."
                     : "The backup includes your emergency fund."}
               </SheetDescription>
             </div>
@@ -100,20 +110,23 @@ export function BackupRow({ status }: { status: BackupStatus }) {
               </button>
             ) : step === "menu" ? (
               <>
-                <dl className="flex flex-col gap-1.5 rounded-xl bg-surface-1 px-3 py-2.5 text-xs ring-1 ring-border">
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-muted-foreground">Weekly email</dt>
-                    <dd className="text-right">{weekly}</dd>
-                  </div>
-                  <div className="flex justify-between gap-3">
-                    <dt className="text-muted-foreground">Last download</dt>
-                    <dd className="text-right">{status.exportedAt ? when(status.exportedAt) : "Never"}</dd>
-                  </div>
+                <dl className="divide-y divide-border rounded-xl bg-surface-1 px-3 text-xs ring-1 ring-border">
+                  {[
+                    ["Monthly email", status.emailReady ? "On" : "Not set up yet"],
+                    ["Last emailed", status.emailedAt ? when(status.emailedAt) : "Not yet"],
+                    ...(status.emailReady ? [["Next email", formatDay(next)]] : []),
+                    ["Last download", status.exportedAt ? when(status.exportedAt) : "Never"],
+                  ].map(([k, v]) => (
+                    <div key={k} className="flex justify-between gap-3 py-2">
+                      <dt className="text-muted-foreground">{k}</dt>
+                      <dd className="text-right font-medium">{v}</dd>
+                    </div>
+                  ))}
                 </dl>
                 {late && status.emailedAt && (
                   <p className="flex items-start gap-2 rounded-xl bg-budget-high/10 px-3 py-2 text-xs text-budget-high">
                     <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-                    The weekly email hasn&apos;t gone out since {when(status.emailedAt)}. Check the cron job in Vercel.
+                    The monthly email hasn&apos;t gone out since {when(status.emailedAt)}. Check the cron job in Vercel.
                   </p>
                 )}
                 <div className="flex flex-col gap-2">
@@ -130,11 +143,28 @@ export function BackupRow({ status }: { status: BackupStatus }) {
                     <span className="flex-1">
                       <span className="block text-sm font-medium">Email it now</span>
                       <span className="block text-xs text-muted-foreground">
-                        {status.emailConfigured ? "Sends the zip to your Gmail" : "Needs the Resend key in Vercel"}
+                        {status.emailConfigured ? "Don't wait for the 1st: send a copy to your Gmail" : "Needs the Resend key in Vercel"}
                       </span>
                     </span>
                     <ChevronRight className="size-4 text-muted-foreground" />
                   </button>
+                </div>
+                <div>
+                  <p className="mb-1.5 px-1 text-xs text-muted-foreground">What&apos;s inside</p>
+                  <ul className="divide-y divide-border rounded-xl bg-surface-1 px-3 ring-1 ring-border">
+                    {CONTENTS.map(({ icon: Icon, label, hint }) => (
+                      <li key={label} className="flex items-center gap-3 py-2.5">
+                        <Icon className="size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1">
+                          <span className="num block text-xs font-medium">{label}</span>
+                          <span className="block text-[11px] text-muted-foreground">{hint}</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-1.5 flex items-center gap-1.5 px-1 text-[11px] text-muted-foreground">
+                    <Lock className="size-3" /> Not included: your PIN and connector links.
+                  </p>
                 </div>
               </>
             ) : (
