@@ -902,6 +902,7 @@ export type Database = {
           account_id: string
           amount_cents: number
           category_id: string | null
+          client_id: string | null
           created_at: string
           date: string
           description: string
@@ -926,6 +927,7 @@ export type Database = {
           account_id: string
           amount_cents: number
           category_id?: string | null
+          client_id?: string | null
           created_at?: string
           date: string
           description?: string
@@ -950,6 +952,7 @@ export type Database = {
           account_id?: string
           amount_cents?: number
           category_id?: string | null
+          client_id?: string | null
           created_at?: string
           date?: string
           description?: string

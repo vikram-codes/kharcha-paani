@@ -604,8 +604,9 @@ export async function getQuickAddOptions() {
  * and into `to`. Not spending, not income: chequing goes down, the card's debt
  * goes down (or savings goes up).
  */
-export async function createTransfer(input: { fromId: string; toId: string; cents: number; date: ISODate; note?: string | null }) {
+export async function createTransfer(input: { fromId: string; toId: string; cents: number; date: ISODate; note?: string | null; clientId?: string | null }) {
   const { db, today } = await authed();
+  const clientId = validClientId(input.clientId);
   if (!Number.isInteger(input.cents) || input.cents <= 0 || input.cents > 100_000_000) throw new Error("Enter an amount.");
   if (input.fromId === input.toId) throw new Error("Pick two different accounts.");
   const date = /^\d{4}-\d{2}-\d{2}$/.test(input.date) ? input.date : today;
@@ -618,12 +619,13 @@ export async function createTransfer(input: { fromId: string; toId: string; cent
   const cat = okMaybe(await db.from("categories").select("id").eq("key", key).maybeSingle());
   const note = input.note?.trim().slice(0, 200) || null;
   const label = to.account_group === "debt_card" ? `Payment to ${to.name}` : `To ${to.name}`;
-  const [out] = ok(
-    await db
-      .from("transactions")
-      .insert({ account_id: from.id, date, amount_cents: -input.cents, description: label, note, category_id: cat?.id ?? null, is_transfer: true, source: "manual" })
-      .select("id"),
-  );
+  const first = await db
+    .from("transactions")
+    .insert({ account_id: from.id, date, amount_cents: -input.cents, description: label, note, category_id: cat?.id ?? null, is_transfer: true, source: "manual", client_id: clientId })
+    .select("id");
+  // Already saved by an earlier attempt of this offline entry: nothing more to do.
+  if (isDuplicateClientId(first.error, clientId)) return { from: from.name, to: to.name };
+  const [out] = ok(first);
   const [inn] = ok(
     await db
       .from("transactions")
@@ -653,7 +655,15 @@ export type NewTransaction = {
   note?: string;
   /** Debt this payment lowers (an Affirm plan, from a bill's "pays"). */
   paysAccountId?: string | null;
+  /** Made on the phone for offline entries, so a retried sync can't save twice. */
+  clientId?: string | null;
 };
+
+const validClientId = (id: string | null | undefined) =>
+  id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ? id : null;
+
+/** The insert hit the (user, client_id) unique index: this entry is already saved. */
+const isDuplicateClientId = (error: { code?: string } | null, clientId: string | null) => !!clientId && error?.code === "23505";
 
 /** Saves a manual entry. Expenses are negative (card purchase → debt up; chequing → cash down). */
 export async function createManualTransaction(input: NewTransaction) {
@@ -674,22 +684,23 @@ export async function createManualTransaction(input: NewTransaction) {
   if (!account) throw new Error("Choose where it was paid from.");
   if (!category || category.kind !== input.kind) throw new Error("Choose a category.");
   const amount = input.kind === "expense" ? -input.amountCents : input.amountCents;
-  ok(
-    await db
-      .from("transactions")
-      .insert({
-        account_id: account.id,
-        category_id: category.id,
-        date: input.date,
-        amount_cents: amount,
-        description: note ?? category.name,
-        note,
-        source: "manual",
-        pays_account_id: pays?.id ?? null,
-      })
-      .select("id")
-      .single(),
-  );
+  const clientId = validClientId(input.clientId);
+  const saved = await db
+    .from("transactions")
+    .insert({
+      account_id: account.id,
+      category_id: category.id,
+      date: input.date,
+      amount_cents: amount,
+      description: note ?? category.name,
+      note,
+      source: "manual",
+      pays_account_id: pays?.id ?? null,
+      client_id: clientId,
+    })
+    .select("id")
+    .single();
+  if (!isDuplicateClientId(saved.error, clientId)) ok(saved);
   ok(await db.from("profiles").update({ last_account_id: account.id }).not("user_id", "is", null).select("user_id"));
   return { account: account.name, category: category.name, amountCents: amount };
 }

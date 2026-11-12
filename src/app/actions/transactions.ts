@@ -18,7 +18,7 @@ export async function addTransaction(input: NewTransaction): Promise<{ ok: true;
   }
 }
 
-export async function addTransfer(input: { fromId: string; toId: string; cents: number; date: string; note?: string }): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+export async function addTransfer(input: { fromId: string; toId: string; cents: number; date: string; note?: string; clientId?: string }): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
   try {
     const t = await createTransfer(input);
     revalidatePath("/", "layout");
