@@ -590,6 +590,39 @@ export type Database = {
         }
         Relationships: []
       }
+      passkeys: {
+        Row: {
+          counter: number
+          created_at: string
+          device: string | null
+          id: string
+          last_used_at: string | null
+          public_key: string
+          transports: string[] | null
+          user_id: string
+        }
+        Insert: {
+          counter?: number
+          created_at?: string
+          device?: string | null
+          id: string
+          last_used_at?: string | null
+          public_key: string
+          transports?: string[] | null
+          user_id?: string
+        }
+        Update: {
+          counter?: number
+          created_at?: string
+          device?: string | null
+          id?: string
+          last_used_at?: string | null
+          public_key?: string
+          transports?: string[] | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       paycheques: {
         Row: {
           actual_date: string | null
@@ -642,6 +675,8 @@ export type Database = {
           pin_locked_until: string | null
           updated_at: string
           user_id: string
+          webauthn_challenge: string | null
+          webauthn_challenge_at: string | null
         }
         Insert: {
           display_name?: string | null
@@ -659,6 +694,8 @@ export type Database = {
           pin_locked_until?: string | null
           updated_at?: string
           user_id?: string
+          webauthn_challenge?: string | null
+          webauthn_challenge_at?: string | null
         }
         Update: {
           display_name?: string | null
@@ -676,6 +713,8 @@ export type Database = {
           pin_locked_until?: string | null
           updated_at?: string
           user_id?: string
+          webauthn_challenge?: string | null
+          webauthn_challenge_at?: string | null
         }
         Relationships: [
           {

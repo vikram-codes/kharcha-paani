@@ -2604,3 +2604,117 @@ export async function notifyApplePayProblem(problem: string, received: Record<st
     },
   ]).catch(() => 0);
 }
+
+// ───────────────────────────── Face ID unlock (passkeys, owner, Nov 12 2026) ─────────────────────────────
+
+/** Where the app is served from: passkeys are bound to this site. */
+export type RelyingParty = { id: string; origin: string };
+
+const CHALLENGE_MS = 5 * 60_000;
+
+async function saveChallenge(db: Db, challenge: string) {
+  const p = okMaybe(await db.from("profiles").select("user_id").maybeSingle());
+  if (!p) throw new Error("Profile not found.");
+  ok(await db.from("profiles").update({ webauthn_challenge: challenge, webauthn_challenge_at: new Date().toISOString() }).eq("user_id", p.user_id).select("user_id"));
+  return p.user_id;
+}
+
+/** The challenge to check a response against (used once, valid 5 minutes). */
+async function takeChallenge(db: Db) {
+  const p = okMaybe(await db.from("profiles").select("user_id,webauthn_challenge,webauthn_challenge_at").maybeSingle());
+  if (!p?.webauthn_challenge || !p.webauthn_challenge_at || Date.now() - Date.parse(p.webauthn_challenge_at) > CHALLENGE_MS) throw new Error("That took too long. Try again.");
+  ok(await db.from("profiles").update({ webauthn_challenge: null, webauthn_challenge_at: null }).eq("user_id", p.user_id).select("user_id"));
+  return p.webauthn_challenge;
+}
+
+/** Turning on Face ID on this device: asks for the PIN first, then returns the passkey request. */
+export async function passkeyRegistrationOptions(rp: RelyingParty, pin: string) {
+  if (userContext.getStore()) throw new Error("Not available over the connector.");
+  const check = await verifyOwnerPin(pin);
+  if (!check.ok) return { ok: false as const, error: check.error };
+  const { db } = await authed();
+  const { generateRegistrationOptions } = await import("@simplewebauthn/server");
+  const { data: claims } = await db.auth.getClaims();
+  const existing = ok(await db.from("passkeys").select("id,transports"));
+  const options = await generateRegistrationOptions({
+    rpName: "Kharcha-Paani",
+    rpID: rp.id,
+    userName: String(claims?.claims?.email ?? "owner"),
+    userDisplayName: "Kharcha-Paani",
+    userID: new TextEncoder().encode(String(claims?.claims?.sub ?? "owner")),
+    attestationType: "none",
+    excludeCredentials: existing.map((c) => ({ id: c.id, transports: c.transports ?? undefined })),
+    authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required", residentKey: "preferred" },
+  });
+  await saveChallenge(db, options.challenge);
+  return { ok: true as const, options };
+}
+
+/** Saves the new passkey once the device has made it with Face ID. */
+export async function passkeyRegister(rp: RelyingParty, response: unknown, device: string) {
+  const { db } = await authed();
+  const { verifyRegistrationResponse } = await import("@simplewebauthn/server");
+  const expectedChallenge = await takeChallenge(db);
+  const v = await verifyRegistrationResponse({
+    response: response as Parameters<typeof verifyRegistrationResponse>[0]["response"],
+    expectedChallenge,
+    expectedOrigin: rp.origin,
+    expectedRPID: rp.id,
+    requireUserVerification: true,
+  });
+  if (!v.verified) throw new Error("Face ID couldn't be set up.");
+  const c = v.registrationInfo.credential;
+  ok(
+    await db
+      .from("passkeys")
+      .upsert({ id: c.id, public_key: Buffer.from(c.publicKey).toString("base64url"), counter: c.counter, transports: c.transports ?? null, device: device.slice(0, 60) })
+      .select("id"),
+  );
+  return { id: c.id };
+}
+
+/** The Face ID request for the lock screen (this device's passkey, or any of yours). */
+export async function passkeyUnlockOptions(rp: RelyingParty, credentialId: string | null) {
+  const { db } = await authed();
+  const { generateAuthenticationOptions } = await import("@simplewebauthn/server");
+  const keys = ok(await db.from("passkeys").select("id,transports"));
+  const allow = credentialId ? keys.filter((k) => k.id === credentialId) : keys;
+  if (!allow.length) return { ok: false as const, error: "Face ID isn't set up on this device.", gone: true };
+  const options = await generateAuthenticationOptions({
+    rpID: rp.id,
+    allowCredentials: allow.map((k) => ({ id: k.id, transports: k.transports ?? undefined })),
+    userVerification: "required",
+  });
+  await saveChallenge(db, options.challenge);
+  return { ok: true as const, options };
+}
+
+/** Checks the Face ID signature; true opens the app. */
+export async function passkeyUnlock(rp: RelyingParty, response: { id?: unknown }) {
+  const { db } = await authed();
+  const { verifyAuthenticationResponse } = await import("@simplewebauthn/server");
+  const key = typeof response.id === "string" ? okMaybe(await db.from("passkeys").select("id,public_key,counter,transports").eq("id", response.id).maybeSingle()) : null;
+  if (!key) throw new Error("Face ID isn't set up on this device.");
+  const expectedChallenge = await takeChallenge(db);
+  const v = await verifyAuthenticationResponse({
+    response: response as Parameters<typeof verifyAuthenticationResponse>[0]["response"],
+    expectedChallenge,
+    expectedOrigin: rp.origin,
+    expectedRPID: rp.id,
+    credential: { id: key.id, publicKey: new Uint8Array(Buffer.from(key.public_key, "base64url")), counter: Number(key.counter), transports: key.transports ?? undefined },
+    requireUserVerification: true,
+  });
+  if (!v.verified) return false;
+  ok(await db.from("passkeys").update({ counter: v.authenticationInfo.newCounter, last_used_at: new Date().toISOString() }).eq("id", key.id).select("id"));
+  return true;
+}
+
+export async function listPasskeys() {
+  const { db } = await authed();
+  return ok(await db.from("passkeys").select("id,device,created_at,last_used_at").order("created_at", { ascending: false }));
+}
+
+export async function removePasskey(id: string) {
+  const { db } = await authed();
+  ok(await db.from("passkeys").delete().eq("id", id).select("id"));
+}
