@@ -2,15 +2,17 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Droplet } from "lucide-react";
+import { Droplet, ScanFace } from "lucide-react";
 import { signOut } from "@/app/actions/auth";
 import { forgetDevice } from "@/lib/forget-device";
 import { appLockEnabled, unlockApp } from "@/app/actions/emergency";
+import { confirmFaceId, hasFaceIdHere, prepareFaceId, type Prepared } from "@/lib/face-id";
 import { PinPad } from "@/components/pin-pad";
 import { checkLocalPin, forgetLocalPin, rememberPin } from "@/lib/local-pin";
 import { setLockCovered } from "@/lib/app-lock-state";
 
-const IDLE_MS = 10 * 60_000;
+/** Locks after 5 minutes away or idle (owner, Nov 12 2026; it was 10). */
+const IDLE_MS = 5 * 60_000;
 const KEY = "kp:last-active";
 
 const readLast = () => {
@@ -52,7 +54,9 @@ const greeting = () => {
 
 /**
  * App lock (owner, Nov 9 2026): asks for the PIN when the app is opened or
- * comes back after 10+ minutes away, or after 10 minutes idle on screen.
+ * comes back after 5+ minutes away, or after 5 minutes idle on screen.
+ * Face ID first when it's set up on this device (Nov 12 2026), the PIN pad
+ * as the fallback.
  * Uses the same PIN (and server-side lockout) as the emergency fund.
  * A privacy screen for the phone in your hand, not a replacement for sign-in.
  */
@@ -61,6 +65,52 @@ export function AppLock() {
   const [state, setState] = useState<"checking" | "locked" | "open">("checking");
   const enabled = useRef<boolean | null>(null);
   const lastTouch = useRef(0);
+  // Face ID (when set up on this device): asked for as the lock screen opens; the card retries.
+  const [faceHere, setFaceHere] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [faceNote, setFaceNote] = useState<string | null>(null);
+
+  const prepared = useRef<Promise<Prepared> | null>(null);
+  const prepare = () => (prepared.current = prepareFaceId());
+
+  const tryFaceId = useCallback(async () => {
+    const ready = await (prepared.current ?? prepare());
+    if (!ready.ok) {
+      prepared.current = null;
+      if (ready.why === "gone") setFaceHere(false);
+      else setFaceNote(ready.why === "offline" ? "Face ID needs a connection. Use your PIN." : "Face ID didn't work. Use your PIN.");
+      return;
+    }
+    setScanning(true);
+    setFaceNote(null);
+    const r = await confirmFaceId(ready.options);
+    setScanning(false);
+    if (r === "ok") {
+      prepared.current = null;
+      writeLast(Date.now());
+      setState("open");
+      return;
+    }
+    // A failed check spends the request; a cancelled prompt doesn't.
+    if (r !== "cancelled") {
+      prepare();
+      setFaceNote(r === "offline" ? "Face ID needs a connection. Use your PIN." : "Face ID didn't work. Try again or use your PIN.");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (state !== "locked") return;
+    // Get the Face ID request ready now, so a tap on the card opens Face ID at once.
+    const t = setTimeout(() => {
+      const here = hasFaceIdHere();
+      setFaceHere(here);
+      if (here) {
+        prepare();
+        void tryFaceId(); // iPhone may want a tap first; then the card does it
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [state, tryFaceId]);
 
   const lockIfIdle = useCallback(() => {
     if (enabled.current === false) return setState("open");
@@ -137,21 +187,50 @@ export function AppLock() {
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-              className="mx-auto flex w-full max-w-sm flex-1 flex-col items-center px-6 pt-[calc(env(safe-area-inset-top)+1.5rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)] md:max-h-[760px] md:my-auto"
+              className="mx-auto flex w-full flex-1 flex-col pt-[calc(env(safe-area-inset-top)+1.5rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)] md:my-auto md:max-h-[820px] md:max-w-md"
             >
               <PinPad
                 variant="screen"
                 header={
-                  <div className="flex flex-col items-center gap-4 text-center">
-                    <span className="grid size-[clamp(56px,8.5dvh,72px)] place-items-center rounded-[24px] bg-[#0a0a0a] shadow-lg ring-1 ring-white/10">
+                  <div className="flex flex-col items-center gap-[clamp(12px,2.4dvh,20px)]">
+                    <span className="grid size-[clamp(52px,7.5dvh,64px)] place-items-center rounded-[22px] bg-[#0a0a0a] shadow-lg ring-1 ring-white/10">
                       <Droplet className="size-[45%] fill-lime text-lime" />
                     </span>
                     <div>
                       <h1 className="text-2xl font-semibold tracking-tight">{greeting()}</h1>
-                      <p className="mt-1 text-sm text-muted-foreground">Enter your PIN to open Kharcha-Paani</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{faceHere ? "Kharcha-Paani is locked" : "Enter your PIN to open Kharcha-Paani"}</p>
                     </div>
                   </div>
                 }
+                above={
+                  faceHere ? (
+                    <div className="flex flex-col items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => void tryFaceId()}
+                        disabled={scanning}
+                        className="flex items-center gap-2 rounded-full bg-surface-1 px-5 py-2.5 text-sm font-medium ring-1 ring-border transition-transform duration-(--duration-fast) active:scale-[0.98]"
+                      >
+                        <motion.span
+                          animate={scanning ? { scale: [1, 1.12, 1], opacity: [1, 0.6, 1] } : { scale: 1, opacity: 1 }}
+                          transition={scanning ? { duration: 0.9, repeat: Infinity } : undefined}
+                          className="grid place-items-center"
+                        >
+                          <ScanFace className="size-5 text-lime-ink" />
+                        </motion.span>
+                        {scanning ? "Scanning…" : "Unlock with Face ID"}
+                      </button>
+                      <p className="text-xs text-muted-foreground">{faceNote ?? "or enter your PIN"}</p>
+                    </div>
+                  ) : null
+                }
+                corner={{
+                  label: "Sign out",
+                  onClick: () => {
+                    forgetDevice();
+                    void signOut();
+                  },
+                }}
                 check={async (pin) => {
                   const res = await unlockApp(pin).catch(() => null);
                   if (!res) {
@@ -176,11 +255,6 @@ export function AppLock() {
                   return res.error;
                 }}
               />
-              <form action={signOut} onSubmit={forgetDevice} className="mt-2">
-                <button type="submit" className="px-3 py-2 text-xs text-muted-foreground hover:text-foreground">
-                  Forgot PIN? Sign out
-                </button>
-              </form>
             </motion.div>
           )}
           {state === "checking" && (

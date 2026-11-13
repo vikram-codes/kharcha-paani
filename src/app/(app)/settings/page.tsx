@@ -6,6 +6,7 @@ import { signOut } from "@/app/actions/auth";
 import { ApplePayRow } from "@/components/applepay-row";
 import { BackupRow } from "@/components/backup-row";
 import { ChangePinForm } from "@/components/change-pin-form";
+import { FaceIdRow } from "@/components/face-id-row";
 import { NotificationsRow } from "@/components/notifications-row";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getApplePaySettings, getBackupStatus, getNotificationSettings } from "@/lib/data";
@@ -56,6 +57,7 @@ export default function SettingsPage() {
             <ChevronRight className="size-4 text-muted-foreground" />
           </Link>
         ))}
+        <FaceIdRow />
         <Suspense fallback={<Skeleton className="my-3 h-10 rounded-xl" />}>
           <ApplePay />
         </Suspense>
