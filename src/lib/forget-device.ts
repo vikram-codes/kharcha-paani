@@ -10,6 +10,8 @@ export function forgetDevice() {
   try {
     localStorage.removeItem("kp:qa-options");
     localStorage.removeItem("kp:lock-on");
+    localStorage.removeItem("kp:pin-length");
+    localStorage.removeItem("kp:passkey");
   } catch {
     /* storage blocked */
   }

@@ -7,6 +7,8 @@
  */
 const KEY = "kp:pin-local";
 const TRIES = "kp:pin-local-tries";
+/** Just the PIN's length (not the PIN), so the keypad can submit on the last digit. */
+const LENGTH = "kp:pin-length";
 export const MAX_OFFLINE_TRIES = 5;
 const ITERATIONS = 150_000;
 
@@ -43,7 +45,18 @@ const store = {
   },
 };
 
+/** The PIN length this phone has seen work, or null before the first unlock. */
+export function pinLength(): number | null {
+  const n = Number(store.get(LENGTH));
+  return n >= 4 && n <= 6 ? n : null;
+}
+
+export function rememberPinLength(n: number) {
+  if (n >= 4 && n <= 6) store.set(LENGTH, String(n));
+}
+
 export async function rememberPin(pin: string) {
+  rememberPinLength(pin.length);
   const salt = hex(crypto.getRandomValues(new Uint8Array(16)));
   store.set(KEY, JSON.stringify({ salt, hash: await hashPin(pin, salt) }));
   store.del(TRIES);
